@@ -311,7 +311,7 @@ const UNCAT="Nem kategorizált költség";
 const SAVE_CAT="Megtakarítás";
 const FIXED_DEFAULT=["Közműdíj","Élelmiszer","Biztosítás","Banki díj és hitel"];
 const CAT_VERSION=2;
-const APP_VERSION="1.2";
+const APP_VERSION="1.4";
 // Régi (korábbi verzió) kategórianevek -> UniCredit főkategóriák. Egyszeri automatikus átálláshoz.
 const OLD_TO_NEW={
   "Rezsi":"Közműdíj","Lakhatás":"Otthon","Háztartás":"Otthon",
@@ -569,16 +569,37 @@ function categoryBreakdown(list){
 }
 
 /* investments */
+function fxFieldFor(ccy){return ccy==="USD"?"usdHuf":"eurHuf";}
+function latestFx(ccy){
+  if(ccy==="HUF")return 1;
+  const f=fxFieldFor(ccy);
+  const arr=(state.fxRates||[]).filter(x=>x[f]).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  return arr.length?arr[arr.length-1][f]:null;
+}
+function fxOn(date,ccy){
+  if(ccy==="HUF")return 1;
+  const f=fxFieldFor(ccy);
+  const arr=(state.fxRates||[]).filter(x=>x[f]).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  if(!arr.length)return null;
+  if(!date)return arr[arr.length-1][f];
+  let best=null;
+  for(const r of arr){ if(r.date<=date)best=r; else break; }
+  return (best||arr[0])[f];
+}
 function investCurrentValue(inv){
   if(inv.type==="bond"){
     const face=inv.face||0;
     const refDate=inv.lastCoupon||inv.purchase||todayISO();
     const d=daysBetween(refDate,todayISO());
     const accrued=face*((inv.rate||0)/100)*(d/365);
-    return {value:face+accrued, accrued, principal:face};
+    return {value:face+accrued, accrued, principal:face, curFx:1, costFx:1};
   } else {
-    const val=(inv.qty||0)*(inv.price||0)*(inv.fx||1);
-    return {value:val, accrued:0, principal:(inv.qty||0)*(inv.cost||inv.price||0)*(inv.fx||1)};
+    const ccy=inv.ccy||"HUF";
+    const curFx = ccy==="HUF" ? 1 : (latestFx(ccy) || inv.fx || 1);
+    const costFx = ccy==="HUF" ? 1 : (fxOn(inv.purchase,ccy) || inv.fx || curFx);
+    const value=(inv.qty||0)*(inv.price||0)*curFx;
+    const principal=(inv.qty||0)*(inv.cost||inv.price||0)*costFx;
+    return {value, accrued:0, principal, curFx, costFx};
   }
 }
 function investTotals(){
@@ -1568,8 +1589,9 @@ function investRow(i){
   if(i.type==="bond"){
     meta=`Névérték ${money(i.face)} · ${NUM2.format(i.rate)}% · felhalmozott kamat ${money(cv.accrued)}`;
   }else{
-    meta=`${NUM2.format(i.qty)} db × ${NUM2.format(i.price)} ${i.ccy||"HUF"}${(i.ccy&&i.ccy!=="HUF")?" (árf. "+NUM2.format(i.fx)+")":""} · ár frissítve: ${i.priceDate||"—"}`;
+    meta=`${NUM2.format(i.qty)} db × ${NUM2.format(i.price)} ${i.ccy||"HUF"}${(i.ccy&&i.ccy!=="HUF")?" @ "+NUM2.format(cv.curFx)+" Ft/"+i.ccy:""} · ár: ${i.priceDate||"—"}`;
   }
+  const gain=cv.value-cv.principal, pct=cv.principal>0?Math.round(gain/cv.principal*1000)/10:0;
   return el("div",{class:"list-item"},
     el("div",{class:"li-main"},
       el("div",{class:"li-name"},i.name||"(névtelen)"),
@@ -1577,14 +1599,14 @@ function investRow(i){
     el("div",{class:"row",style:"gap:14px"},
       el("div",{style:"text-align:right"},
         el("div",{style:"font-weight:600;font-size:15px"},money(cv.value)),
-        el("div",{class:"li-meta "+(cv.value-cv.principal>=0?"pos":"neg")},(cv.value-cv.principal>=0?"+":"")+money(cv.value-cv.principal))),
+        el("div",{class:"li-meta "+(gain>=0?"pos":"neg")},(gain>=0?"+":"")+money(gain)+(cv.principal>0?" ("+(gain>=0?"+":"")+NUM2.format(pct)+"%)":""))),
       el("button",{class:"btn ghost sm",onclick:()=>openInvest(i.type,i)},"Szerkeszt"),
       el("button",{class:"iconbtn",onclick:()=>{if(confirm("Törlöd: "+i.name+"?")){state.investments=state.investments.filter(x=>x.id!==i.id);save();renderInvest();}}},"✕")));
 }
 function openInvest(type,existing){
   const i=existing?Object.assign({},existing):(type==="bond"
     ?{id:uid(),type:"bond",name:"",face:0,rate:0,purchase:todayISO(),lastCoupon:""}
-    :{id:uid(),type:"stock",name:"",qty:0,price:0,cost:0,ccy:"HUF",fx:1,priceDate:todayISO()});
+    :{id:uid(),type:"stock",name:"",qty:0,price:0,cost:0,ccy:"HUF",fx:1,priceDate:todayISO(),purchase:""});
   let body;
   const acctSel=el("select",{});
   acctSel.append(el("option",{value:""},"— nincs / nem rendelt —"));
@@ -1614,30 +1636,49 @@ function openInvest(type,existing){
   }else{
     const nameI=el("input",{type:"text",value:i.name,placeholder:"pl. OTP részvény / VWCE ETF"});
     const qtyI=el("input",{type:"text",value:i.qty||"",placeholder:"darabszám"});
-    const priceI=el("input",{type:"text",value:i.price||"",placeholder:"előző napi záró ár"});
+    const priceI=el("input",{type:"text",value:i.price||"",placeholder:"előző napi záró ár (devizában)"});
     const costI=el("input",{type:"text",value:i.cost||"",placeholder:"átlagos bekerülési ár (opc.)"});
     const ccyI=el("select",{});["HUF","EUR","USD"].forEach(x=>ccyI.append(el("option",{value:x,...(x===(i.ccy||"HUF")?{selected:"selected"}:{})},x)));
-    const fxI=el("input",{type:"text",value:i.fx||1,placeholder:"1 deviza = ? Ft"});
+    const fxI=el("input",{type:"text",value:i.fx||"",placeholder:"csak ha nincs árfolyam-adat"});
     const pdI=el("input",{type:"date",value:i.priceDate||todayISO()});
-    const fxWrap=field2("Árfolyam (1 deviza = ? Ft)",fxI);
+    const purI2=el("input",{type:"date",value:i.purchase||""});
+    const fxWrap=field2("Tartalék árfolyam (ha nincs élő adat)",fxI);
     const syncFx=()=>{fxWrap.style.display=ccyI.value==="HUF"?"none":"";};
-    ccyI.addEventListener("change",syncFx);
+    const prev=el("div",{class:"note",style:"margin-top:12px"});
+    function updatePreview(){
+      const q=parseHUNumber(qtyI.value)||0, p=parseHUNumber(priceI.value)||0, c=parseHUNumber(costI.value)||0;
+      const ccy=ccyI.value, manual=parseHUNumber(fxI.value)||0;
+      const curFx=ccy==="HUF"?1:(latestFx(ccy)||manual||1);
+      const costFx=ccy==="HUF"?1:(fxOn(purI2.value,ccy)||manual||curFx);
+      const hasLive=ccy!=="HUF"&&latestFx(ccy)!=null;
+      const val=q*p*curFx, cost=(c||p)*q*costFx, gain=val-cost, pct=cost>0?Math.round(gain/cost*1000)/10:0;
+      prev.innerHTML="";
+      const rows=[el("div",{},"Számított aktuális érték: ",el("b",{},money(val)))];
+      if(ccy!=="HUF")rows.push(el("div",{style:"margin-top:2px;color:var(--muted)"},"Mai árfolyam: "+NUM2.format(curFx)+" Ft/"+ccy+(hasLive?" (árfolyam-modulból)":" ⚠ kézi tartalék – tölts be árfolyamot az árfolyam-kártyán!")));
+      rows.push(el("div",{style:"margin-top:2px;color:var(--muted)"},"Bekerülés: "+money(cost)+(ccy!=="HUF"&&purI2.value?" (vételkori árf.: "+NUM2.format(costFx)+")":"")));
+      rows.push(el("div",{style:"margin-top:2px"},"Hozam: ",el("b",{class:gain>=0?"pos":"neg"},(gain>=0?"+":"")+money(gain)+(cost>0?" ("+(gain>=0?"+":"")+NUM2.format(pct)+"%)":""))));
+      prev.append(el("span",{class:"em"},"∑"),el("div",{},...rows));
+    }
+    ccyI.addEventListener("change",()=>{syncFx();updatePreview();});
+    [qtyI,priceI,fxI,costI,purI2,pdI].forEach(inp=>inp.addEventListener("input",updatePreview));
     body=el("div",{},
-      el("div",{class:"note"},el("span",{class:"em"},"ℹ"),"Az árat kézzel írod be (előző napi záró). Devizás eszköznél add meg az árfolyamot a Ft-értékhez. Bármikor frissítheted az árat itt."),
+      el("div",{class:"note"},el("span",{class:"em"},"ℹ"),"A darabszámot és az árat (előző napi záró, devizában) add meg – a Ft-értéket a mindenkori napi árfolyammal számolom az Árfolyamok modulból, nem kell kézzel árfolyamot vezetned. A vásárlás dátumából a vételkori árfolyamot is onnan keresem vissza (ehhez legyen betöltve az árfolyam-sor az árfolyam-kártyán)."),
       el("div",{class:"formgrid",style:"margin-top:14px"},
         el("div",{class:"field full"},el("label",{},"Megnevezés"),nameI),
         field2("Darabszám",qtyI),
         field2("Ár / db (előző napi záró)",priceI),
         field2("Bekerülési ár / db (opc.)",costI),
         field2("Devizanem",ccyI),
-        fxWrap,
+        field2("Vásárlás dátuma (opc.)",purI2),
         field2("Ár dátuma",pdI),
-        acctField));
-    setTimeout(syncFx,0);
+        fxWrap,
+        acctField),
+      prev);
+    setTimeout(()=>{syncFx();updatePreview();},0);
     showModal(existing?"Tőzsdei eszköz szerkesztése":"Tőzsdei eszköz felvitele",body,[
       {label:"Mégse",cls:"ghost",onclick:closeModal},
       {label:existing?"Mentés":"Hozzáadás",cls:"",onclick:()=>{
-        i.name=nameI.value.trim()||"Eszköz";i.qty=parseHUNumber(qtyI.value)||0;i.price=parseHUNumber(priceI.value)||0;i.cost=parseHUNumber(costI.value)||0;i.ccy=ccyI.value;i.fx=i.ccy==="HUF"?1:(parseHUNumber(fxI.value)||1);i.priceDate=pdI.value;i.accountId=acctSel.value;
+        i.name=nameI.value.trim()||"Eszköz";i.qty=parseHUNumber(qtyI.value)||0;i.price=parseHUNumber(priceI.value)||0;i.cost=parseHUNumber(costI.value)||0;i.ccy=ccyI.value;i.fx=i.ccy==="HUF"?1:(parseHUNumber(fxI.value)||i.fx||0);i.priceDate=pdI.value;i.purchase=purI2.value;i.accountId=acctSel.value;
         upsertInvest(i,existing);
       }}]);
   }
