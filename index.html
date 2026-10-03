@@ -233,6 +233,7 @@ canvas{max-width:100%}
     <div class="foot">
       Az adatok csak ebben a böngészőben tárolódnak, sehova nem töltődnek fel.
       <button class="themebtn" id="themeBtn">🌓 Téma váltása</button>
+      <div id="appVer" style="margin-top:8px;color:var(--faint);font-size:11px"></div>
     </div>
   </aside>
 
@@ -310,6 +311,7 @@ const UNCAT="Nem kategorizált költség";
 const SAVE_CAT="Megtakarítás";
 const FIXED_DEFAULT=["Közműdíj","Élelmiszer","Biztosítás","Banki díj és hitel"];
 const CAT_VERSION=2;
+const APP_VERSION="1.1";
 // Régi (korábbi verzió) kategórianevek -> UniCredit főkategóriák. Egyszeri automatikus átálláshoz.
 const OLD_TO_NEW={
   "Rezsi":"Közműdíj","Lakhatás":"Otthon","Háztartás":"Otthon",
@@ -419,6 +421,7 @@ function freshState(){
       {id:uid(),name:"Babaváró hitel",principal:0,rate:0,term:0,start:monthOf(todayISO()),payment:0}
     ],
     investments:[],
+    accounts:[],           // {id, name, type:'tbsz'|'szla'|'egyeb', openYear}
     snapshots:[],          // {date, value} portfolio value snapshots
     fxRates:[],            // {date, eurHuf, usdHuf} napi árfolyamok
     fxLastFetch:0,
@@ -582,6 +585,25 @@ function investTotals(){
   let total=0,principal=0,bond=0,stock=0;
   state.investments.forEach(i=>{const c=investCurrentValue(i);total+=c.value;principal+=c.principal;if(i.type==="bond")bond+=c.value;else stock+=c.value;});
   return {total,principal,bond,stock,gain:total-principal};
+}
+function accountTotals(accId){
+  let total=0,principal=0;
+  state.investments.forEach(i=>{ if((i.accountId||"")===(accId||"")){const c=investCurrentValue(i);total+=c.value;principal+=c.principal;} });
+  return {total,principal,gain:total-principal};
+}
+const ACC_TYPES={tbsz:"TBSZ",szla:"Értékpapírszámla",nyesz:"NYESZ",egyeb:"Egyéb"};
+function tbszStatus(openYear){
+  const N=Math.round(openYear||0);
+  if(!N)return null;
+  const now=new Date();
+  const d3=new Date(N+3,11,31), d5=new Date(N+5,11,31);
+  const newRules=N>=2025;
+  let phase,tax,cls;
+  if(now.getFullYear()<=N){ phase="Gyűjtőév – még befizethetsz"; tax=newRules?"korai feltörés: 28%":"korai feltörés: 15%"; cls="warn"; }
+  else if(now<d3){ phase="Lekötési időszak (3 év előtt)"; tax=newRules?"feltöréskor 28% (15% szja + 13% szocho)":"feltöréskor 15% szja"; cls="neg"; }
+  else if(now<d5){ phase="3 év letelt – kedvezményes"; tax=newRules?"kivét: 18% (10% + 8%)":"kivét: 10% szja"; cls="warn"; }
+  else { phase="Lejárt – adómentesen kivehető"; tax="0% (adómentes)"; cls="pos"; }
+  return {phase,tax,cls,reduced:(N+3)+". dec. 31.",mature:(N+5)+". dec. 31.",newRules};
 }
 
 /* loans */
@@ -1317,14 +1339,15 @@ function renderLoans(){
 function renderInvest(){
   const c=content();c.innerHTML="";
   c.append(el("div",{class:"page-h"},
-    el("div",{},el("h1",{},"Befektetések"),el("div",{class:"sub"},"Állampapír (számolt érték) és TBSZ tőzsdei eszközök")),
+    el("div",{},el("h1",{},"Befektetések"),el("div",{class:"sub"},"Számlák (TBSZ évjáratok, értékpapírszámla), állampapír és tőzsdei eszközök")),
     el("div",{class:"row"},
-      el("button",{class:"btn ghost",onclick:recordSnapshot},"⭓ Pillanatkép rögzítése"),
+      el("button",{class:"btn ghost",onclick:()=>openAccount()},"＋ Számla"),
+      el("button",{class:"btn ghost",onclick:recordSnapshot},"⭓ Pillanatkép"),
       el("button",{class:"btn ghost",onclick:()=>openInvest("bond")},"＋ Állampapír"),
-      el("button",{class:"btn ghost",onclick:()=>openInvest("stock")},"＋ Tőzsdei eszköz"))));
+      el("button",{class:"btn ghost",onclick:()=>openInvest("stock")},"＋ Tőzsdei"))));
 
   c.append(el("div",{class:"note"},el("span",{class:"em"},"ℹ"),el("div",{},
-    "Az oldal biztonsági okból nem tud élő árfolyamot lekérni. Állampapírnál nincs is árfolyam: az érték = névérték + felhalmozott kamat (lineáris közelítés, a megadott éves kamatból). Tőzsdei eszköznél az előző napi záró árat kézzel írod be, és bármikor frissítheted.")));
+    "Az oldal nem tud élő árfolyamot lekérni (lásd az árfolyam-kártyát). Állampapírnál érték = névérték + felhalmozott kamat (lineáris közelítés). Tőzsdei eszköznél az árat kézzel írod be. A tételeket számlához (TBSZ / értékpapírszámla) rendelheted, és TBSZ-nél kiírom a 3/5 éves kulcsdátumot és az aktuális adózást.")));
 
   const it=investTotals();
   c.append(el("div",{class:"grid tiles",style:"margin:14px 0"},
@@ -1335,21 +1358,21 @@ function renderInvest(){
 
   renderFxCard(c);
 
-  if(state.investments.length===0){
-    c.append(emptyState("Még nincs befektetés","Vegyél fel egy állampapír-tételt vagy egy TBSZ-en tartott részvényt/ETF-et.",null));
+  if(state.investments.length===0 && (state.accounts||[]).length===0){
+    c.append(emptyState("Még nincs befektetés","Hozz létre egy számlát (pl. TBSZ 2022, vagy értékpapírszámla), majd vegyél fel rá állampapírt vagy tőzsdei eszközt.","＋ Számla létrehozása",()=>openAccount()));
     return;
   }
-  const bonds=state.investments.filter(i=>i.type==="bond");
-  const stocks=state.investments.filter(i=>i.type==="stock");
-  if(bonds.length){
-    c.append(el("div",{class:"section-title"},"ÁLLAMPAPÍR"));
-    const card=el("div",{class:"card"});
-    bonds.forEach(i=>card.append(investRow(i)));c.append(card);
-  }
-  if(stocks.length){
-    c.append(el("div",{class:"section-title"},"TŐZSDEI ESZKÖZ (TBSZ)"));
-    const card=el("div",{class:"card"});
-    stocks.forEach(i=>card.append(investRow(i)));c.append(card);
+
+  const accs=(state.accounts||[]).slice();
+  accs.forEach(acc=>c.append(accountCard(acc)));
+  const unassigned=state.investments.filter(i=>!i.accountId || !accs.some(a=>a.id===i.accountId));
+  if(unassigned.length){
+    const card=el("div",{class:"card",style:"margin-top:14px"});
+    card.append(el("div",{style:"padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px"},
+      el("h3",{},"Számlához nem rendelt tételek"),
+      el("span",{class:"chip"},money(unassigned.reduce((a,i)=>a+investCurrentValue(i).value,0)))));
+    unassigned.forEach(i=>card.append(investRow(i)));
+    c.append(card);
   }
   // allocation chart
   c.append(el("div",{class:"card pad",style:"margin-top:14px"},el("h3",{},"Vagyonmegoszlás"),el("div",{class:"chart-box sm"},el("canvas",{id:"allocChart"}))));
@@ -1548,6 +1571,10 @@ function openInvest(type,existing){
     ?{id:uid(),type:"bond",name:"",face:0,rate:0,purchase:todayISO(),lastCoupon:""}
     :{id:uid(),type:"stock",name:"",qty:0,price:0,cost:0,ccy:"HUF",fx:1,priceDate:todayISO()});
   let body;
+  const acctSel=el("select",{});
+  acctSel.append(el("option",{value:""},"— nincs / nem rendelt —"));
+  (state.accounts||[]).forEach(ac=>acctSel.append(el("option",{value:ac.id,...(ac.id===(i.accountId||"")?{selected:"selected"}:{})},(ac.name||ACC_TYPES[ac.type]||"Számla"))));
+  const acctField=field2("Számla",acctSel);
   if(type==="bond"){
     const nameI=el("input",{type:"text",value:i.name,placeholder:"pl. MÁP Plusz 2029/J"});
     const faceI=el("input",{type:"text",value:i.face||"",placeholder:"pl. 5 000 000"});
@@ -1561,11 +1588,12 @@ function openInvest(type,existing){
         field2("Névérték (Ft)",faceI),
         field2("Aktuális éves kamat (%)",rateI),
         field2("Vásárlás dátuma",purI),
-        field2("Utolsó kamatfizetés (ha volt)",lcI)));
+        field2("Utolsó kamatfizetés (ha volt)",lcI),
+        acctField));
     showModal(existing?"Állampapír szerkesztése":"Állampapír felvitele",body,[
       {label:"Mégse",cls:"ghost",onclick:closeModal},
       {label:existing?"Mentés":"Hozzáadás",cls:"",onclick:()=>{
-        i.name=nameI.value.trim()||"Állampapír";i.face=parseHUNumber(faceI.value)||0;i.rate=parseHUNumber(rateI.value)||0;i.purchase=purI.value;i.lastCoupon=lcI.value;
+        i.name=nameI.value.trim()||"Állampapír";i.face=parseHUNumber(faceI.value)||0;i.rate=parseHUNumber(rateI.value)||0;i.purchase=purI.value;i.lastCoupon=lcI.value;i.accountId=acctSel.value;
         upsertInvest(i,existing);
       }}]);
   }else{
@@ -1588,12 +1616,13 @@ function openInvest(type,existing){
         field2("Bekerülési ár / db (opc.)",costI),
         field2("Devizanem",ccyI),
         fxWrap,
-        field2("Ár dátuma",pdI)));
+        field2("Ár dátuma",pdI),
+        acctField));
     setTimeout(syncFx,0);
     showModal(existing?"Tőzsdei eszköz szerkesztése":"Tőzsdei eszköz felvitele",body,[
       {label:"Mégse",cls:"ghost",onclick:closeModal},
       {label:existing?"Mentés":"Hozzáadás",cls:"",onclick:()=>{
-        i.name=nameI.value.trim()||"Eszköz";i.qty=parseHUNumber(qtyI.value)||0;i.price=parseHUNumber(priceI.value)||0;i.cost=parseHUNumber(costI.value)||0;i.ccy=ccyI.value;i.fx=i.ccy==="HUF"?1:(parseHUNumber(fxI.value)||1);i.priceDate=pdI.value;
+        i.name=nameI.value.trim()||"Eszköz";i.qty=parseHUNumber(qtyI.value)||0;i.price=parseHUNumber(priceI.value)||0;i.cost=parseHUNumber(costI.value)||0;i.ccy=ccyI.value;i.fx=i.ccy==="HUF"?1:(parseHUNumber(fxI.value)||1);i.priceDate=pdI.value;i.accountId=acctSel.value;
         upsertInvest(i,existing);
       }}]);
   }
@@ -1602,6 +1631,62 @@ function upsertInvest(i,existing){
   if(existing){const idx=state.investments.findIndex(x=>x.id===i.id);if(idx>=0)state.investments[idx]=i;}
   else state.investments.push(i);
   save();closeModal();renderInvest();toast("Mentve");
+}
+function accountCard(acc){
+  const t=accountTotals(acc.id);
+  const holdings=state.investments.filter(i=>i.accountId===acc.id);
+  const card=el("div",{class:"card",style:"margin-top:14px"});
+  const head=el("div",{style:"padding:14px 16px;border-bottom:1px solid var(--border)"});
+  head.append(el("div",{class:"row",style:"justify-content:space-between;align-items:flex-start;gap:10px"},
+    el("div",{},
+      el("div",{class:"row",style:"gap:8px;align-items:center"},
+        el("h3",{},acc.name||ACC_TYPES[acc.type]||"Számla"),
+        el("span",{class:"chip"},ACC_TYPES[acc.type]||acc.type||"")),
+      (acc.type==="tbsz"&&acc.openYear)?el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:4px"},"Gyűjtőév (nyitás): "+acc.openYear):""),
+    el("div",{class:"row",style:"gap:6px;align-items:center"},
+      el("div",{style:"text-align:right"},el("div",{style:"font-weight:700"},money(t.total)),el("div",{class:"li-meta "+(t.gain>=0?"pos":"neg")},(t.gain>=0?"+":"")+money(t.gain))),
+      el("button",{class:"btn ghost sm",onclick:()=>openAccount(acc)},"Szerkeszt"),
+      el("button",{class:"iconbtn",onclick:()=>{if(confirm("Törlöd a(z) „"+(acc.name||"")+"” számlát? A rajta lévő tételek „nem rendelt” állapotba kerülnek (nem törlődnek).")){state.accounts=state.accounts.filter(x=>x.id!==acc.id);state.investments.forEach(i=>{if(i.accountId===acc.id)i.accountId="";});save();renderInvest();}}},"✕"))));
+  if(acc.type==="tbsz"&&acc.openYear){
+    const st=tbszStatus(acc.openYear);
+    if(st){
+      head.append(el("div",{class:"kv",style:"margin-top:10px"},
+        el("div",{class:"k"},"Állapot: ",el("b",{class:st.cls},st.phase)),
+        el("div",{class:"k"},"3 év vége: ",el("b",{},st.reduced)),
+        el("div",{class:"k"},"Adómentes: ",el("b",{},st.mature)),
+        el("div",{class:"k"},"Most feltörve: ",el("b",{},st.tax))));
+    }
+  }
+  card.append(head);
+  if(holdings.length)holdings.forEach(i=>card.append(investRow(i)));
+  else card.append(el("div",{style:"padding:14px 16px;color:var(--faint);font-size:12.5px"},"Még nincs tétel ezen a számlán. A „＋ Állampapír” / „＋ Tőzsdei” gombnál válaszd ki ezt a számlát."));
+  return card;
+}
+function openAccount(existing){
+  const a=existing?Object.assign({},existing):{id:uid(),name:"",type:"tbsz",openYear:new Date().getFullYear()};
+  const nameI=el("input",{type:"text",value:a.name,placeholder:"pl. TBSZ 2022 / Erste értékpapírszámla"});
+  const typeSel=el("select",{});Object.keys(ACC_TYPES).forEach(k=>typeSel.append(el("option",{value:k,...(k===a.type?{selected:"selected"}:{})},ACC_TYPES[k])));
+  const yearI=el("input",{type:"number",value:a.openYear||"",placeholder:"pl. 2022",min:"2000",max:"2100"});
+  const yearField=field2("Gyűjtőév (nyitás éve)",yearI);
+  function syncYear(){yearField.style.display=typeSel.value==="tbsz"?"":"none";}
+  typeSel.addEventListener("change",syncYear);
+  const body=el("div",{},
+    el("div",{class:"note"},el("span",{class:"em"},"ℹ"),el("div",{},"TBSZ-nél add meg a gyűjtőévet (a nyitás évét) – ebből számolom a 3 és 5 éves kulcsdátumot és az aktuális adózást. Évente külön TBSZ nyitható, vedd fel mindet külön számlaként (TBSZ 2022, TBSZ 2023…).")),
+    el("div",{class:"formgrid",style:"margin-top:12px"},
+      el("div",{class:"field full"},el("label",{},"Megnevezés"),nameI),
+      field2("Típus",typeSel),
+      yearField));
+  setTimeout(syncYear,0);
+  showModal(existing?"Számla szerkesztése":"Új számla",body,[
+    {label:"Mégse",cls:"ghost",onclick:closeModal},
+    {label:existing?"Mentés":"Létrehozás",cls:"",onclick:()=>{
+      a.type=typeSel.value;
+      a.openYear=a.type==="tbsz"?(parseInt(yearI.value,10)||0):0;
+      a.name=nameI.value.trim()||(ACC_TYPES[a.type]+(a.type==="tbsz"&&a.openYear?" "+a.openYear:""));
+      if(!state.accounts)state.accounts=[];
+      if(existing){const idx=state.accounts.findIndex(x=>x.id===a.id);if(idx>=0)state.accounts[idx]=a;}else state.accounts.push(a);
+      save();closeModal();renderInvest();toast("Számla mentve");
+    }}]);
 }
 
 /* ---- éves terv (planned expenses) ---- */
@@ -1874,7 +1959,8 @@ function renderSettings(){
     el("div",{class:"k"},"Tranzakció: ",el("b",{},state.transactions.length)),
     el("div",{class:"k"},"Hitel: ",el("b",{},state.loans.length)),
     el("div",{class:"k"},"Befektetés: ",el("b",{},state.investments.length)),
-    el("div",{class:"k"},"Kategória: ",el("b",{},state.categories.length)));
+    el("div",{class:"k"},"Kategória: ",el("b",{},state.categories.length)),
+    el("div",{class:"k"},"Verzió: ",el("b",{},APP_VERSION)));
   dCard.append(stat);
   c.append(dCard);
 }
@@ -1912,6 +1998,7 @@ function boot(){
   try{ migrated=migrateCategories(); }catch(e){ console.warn("migrate failed",e); }
   initTheme();
   buildNav();
+  const av=$("#appVer");if(av)av.textContent="verzió "+APP_VERSION;
   renderPage("overview");
   autoFxFetch();
   if(migrated)setTimeout(()=>toast("A kategóriák átálltak a UniCredit rendszerre"),400);
