@@ -311,7 +311,7 @@ const UNCAT="Nem kategorizált költség";
 const SAVE_CAT="Megtakarítás";
 const FIXED_DEFAULT=["Közműdíj","Élelmiszer","Biztosítás","Banki díj és hitel"];
 const CAT_VERSION=2;
-const APP_VERSION="1.9";
+const APP_VERSION="2.0";
 // Régi (korábbi verzió) kategórianevek -> UniCredit főkategóriák. Egyszeri automatikus átálláshoz.
 const OLD_TO_NEW={
   "Rezsi":"Közműdíj","Lakhatás":"Otthon","Háztartás":"Otthon",
@@ -493,12 +493,24 @@ function save(){
 }
 function normDesc(d){return String(d||"").toLowerCase().replace(/\s+/g," ").replace(/[0-9]{6,}/g,"").trim().slice(0,60);}
 function applyRules(txn){return categorizeTxn(txn).cat;}
+function autoSubFor(txn,cat){
+  if(!cat||cat===UNCAT)return "";
+  if(txn.mcc&&MCC_SUB[txn.mcc]){const cs=MCC_SUB[txn.mcc];if(cs[0]===cat)return validSub(cat,cs[1]);}
+  const ms=merchantSub(txn.description);if(ms&&ms[0]===cat)return validSub(cat,ms[1]);
+  const nd=normDesc(txn.description);
+  if(state.ruleSubs&&state.ruleSubs[nd]&&state.rules[nd]===cat)return validSub(cat,state.ruleSubs[nd]);
+  return "";
+}
 function autoCategorizeUncategorized(){
   let n=0;
   state.transactions.forEach(t=>{
-    if(t.category&&t.category!==UNCAT)return;
-    const r=categorizeTxn(Object.assign({},t,{category:UNCAT}));
-    if(r.cat!==UNCAT){t.category=r.cat;t.subcategory=validSub(r.cat,r.sub);n++;}
+    if(!t.category||t.category===UNCAT){
+      const r=categorizeTxn(Object.assign({},t,{category:UNCAT}));
+      if(r.cat!==UNCAT){t.category=r.cat;t.subcategory=validSub(r.cat,r.sub);n++;}
+    } else if(!t.subcategory){
+      const sub=autoSubFor(t,t.category);
+      if(sub){t.subcategory=sub;n++;}
+    }
   });
   save();return n;
 }
