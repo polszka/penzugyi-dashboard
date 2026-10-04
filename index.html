@@ -311,7 +311,7 @@ const UNCAT="Nem kategorizált költség";
 const SAVE_CAT="Megtakarítás";
 const FIXED_DEFAULT=["Közműdíj","Élelmiszer","Biztosítás","Banki díj és hitel"];
 const CAT_VERSION=2;
-const APP_VERSION="2.6";
+const APP_VERSION="2.7";
 // KSH éves átlagos infláció (%) – hivatalos; 2025:4,4; 2026 becslés
 const INFLATION_DEFAULT={"2006":3.9,"2007":8.0,"2008":6.1,"2009":4.2,"2010":4.9,"2011":3.9,"2012":5.7,"2013":1.7,"2014":-0.2,"2015":-0.1,"2016":0.4,"2017":2.4,"2018":2.8,"2019":3.4,"2020":3.3,"2021":5.1,"2022":14.5,"2023":17.6,"2024":3.7,"2025":4.4,"2026":4.5};
 // EUR/HUF éves átlag (közelítő, MNB-alapú); 2025/2026 becslés
@@ -2181,7 +2181,7 @@ function openPlanItem(existing){
 }
 
 /* ---- bevétel (income) ---- */
-let incPerson="household", incMetric="ann", incBrutNet="net", incBaseMode="end";
+let incPerson="household", incMetric="ann", incBrutNet="net", incBaseMode="end", incMetricUserSet=false;
 function incYears(){return Object.keys(state.income||{}).filter(y=>/^\d{4}$/.test(y)).sort();}
 function incPartial(year){const d=(state.income&&state.income[year])||{};if(d.partial===true)return true;if(d.partial===false)return false;return (+year)===new Date().getFullYear();}
 function baseList(d,bn){
@@ -2212,6 +2212,12 @@ function bonusVal(year,person,bn){
   const tot=incVal(year,person,"ann",bn),base=annualBaseVal(year,person,bn);
   if(tot==null||base==null)return null;return tot-base;
 }
+function metricHasData(metric){return incYears().some(y=>["me","wife"].some(p=>incVal(y,p,metric,"net")!=null||incVal(y,p,metric,"gross")!=null));}
+function chartOrEmpty(canvasId,hasData,msg){
+  if(hasData)return true;
+  const cv=$("#"+canvasId);if(cv&&cv.parentElement)cv.parentElement.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--faint);font-size:12.5px;text-align:center;padding:16px;line-height:1.5">'+msg+'</div>';
+  return false;
+}
 function loadIncomeMacro(){
   if(!state.income)state.income={};
   Object.keys(INFLATION_DEFAULT).forEach(y=>{
@@ -2225,6 +2231,7 @@ function renderIncome(){
   const c=content();c.innerHTML="";
   if(!state.income)state.income={};
   if(Object.keys(state.income).length===0)loadIncomeMacro();
+  if(!incMetricUserSet && !metricHasData(incMetric) && metricHasData(incMetric==="ann"?"base":"ann"))incMetric=(incMetric==="ann"?"base":"ann");
   c.append(el("div",{class:"page-h"},
     el("div",{},el("h1",{},"Bevétel"),el("div",{class:"sub"},"Éves bérek és reálbér-alakulás – infláció és EUR/HUF környezettel")),
     el("div",{class:"row"},
@@ -2234,7 +2241,7 @@ function renderIncome(){
   const mk=(opts,cur,setter)=>{const seg=el("div",{class:"seg"});opts.forEach(o=>seg.append(el("button",{class:cur===o[0]?"active":"",onclick:()=>{setter(o[0]);renderIncome();}},o[1])));return seg;};
   const ctrlRow=el("div",{class:"row",style:"gap:16px;flex-wrap:wrap"},
     el("div",{class:"field"},el("label",{},"Kire"),mk([["household","Együtt"],["me",state.owners.me],["wife",state.owners.wife]],incPerson,v=>incPerson=v)),
-    el("div",{class:"field"},el("label",{},"Mutató"),mk([["ann","Éves bevétel"],["base","Havi alapbér"]],incMetric,v=>incMetric=v)),
+    el("div",{class:"field"},el("label",{},"Mutató"),mk([["ann","Éves bevétel"],["base","Havi alapbér"]],incMetric,v=>{incMetric=v;incMetricUserSet=true;})),
     el("div",{class:"field"},el("label",{},"Típus"),mk([["net","Nettó"],["gross","Bruttó"]],incBrutNet,v=>incBrutNet=v)));
   if(incMetric==="base")ctrlRow.append(el("div",{class:"field"},el("label",{},"Alapbér"),mk([["end","Év végi"],["avg","Éves átlag"]],incBaseMode,v=>incBaseMode=v)));
   c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},ctrlRow));
@@ -2288,10 +2295,13 @@ function renderIncome(){
       nomDs.push({label:incPerson==="me"?state.owners.me:state.owners.wife,data:yearsL.map(y=>incVal(y,incPerson,incMetric,incBrutNet)),backgroundColor:cssVar("--accent")});
     }
     const stacked=incPerson==="household";
+    const nomMsg=(incMetric==="ann"?"Ehhez a nézethez nincs „Éves bevétel” adat. Kapcsolj a „Mutató”-nál „Havi alapbér”-re, vagy vigyél fel éves összesítőt az adott évhez.":"Nincs havi alapbér adat ehhez a kijelöléshez. Vigyél fel alapbért, vagy kapcsolj „Éves bevétel”-re.");
+    if(chartOrEmpty("incNomChart",nomDs.some(d=>d.data.some(v=>v!=null)),nomMsg))
     makeChart("incNomChart",{type:"bar",data:{labels:yearsL,datasets:nomDs},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:txtC,font:{size:11}}},tooltip:{callbacks:{label:x=>x.dataset.label+": "+money(x.raw)}}},scales:{x:{stacked:stacked,ticks:{color:txtC,font:{size:10}},grid:{display:false}},y:{stacked:stacked,ticks:{color:txtC,font:{size:10},callback:v=>NUM.format(v)},grid:{color:gridC}}}}});
 
     const compBase=yearsL.map(y=>incPartial(y)?null:annualBaseVal(y,incPerson,incBrutNet));
     const compBonus=yearsL.map(y=>incPartial(y)?null:bonusVal(y,incPerson,incBrutNet));
+    if(chartOrEmpty("incCompChart",compBase.some(v=>v!=null)||compBonus.some(v=>v!=null),"Az összetételhez a havi alapbér mellett az „Éves bevétel” összesítő is kell (teljes évekre). Vidd fel az éves bruttó/nettó mezőket."))
     makeChart("incCompChart",{type:"bar",data:{labels:yearsL,datasets:[
       {label:"Alapbér (éves)",data:compBase,backgroundColor:cssVar("--accent")},
       {label:"Bónusz és egyéb",data:compBonus,backgroundColor:cssVar("--warn")}
@@ -2301,12 +2311,14 @@ function renderIncome(){
     const realDs=[];
     if(incPerson==="household")realDs.push({label:"Háztartás",data:realSeries("household"),borderColor:cssVar("--accent"),backgroundColor:"transparent",tension:.1,pointRadius:3,borderWidth:2,spanGaps:true});
     else realDs.push({label:incPerson==="me"?state.owners.me:state.owners.wife,data:realSeries(incPerson),borderColor:cssVar("--accent"),backgroundColor:"transparent",tension:.1,pointRadius:3,borderWidth:2,spanGaps:true});
+    if(chartOrEmpty("incRealChart",realDs.some(d=>d.data.some(v=>v!=null)),"A reálbérhez legalább két egymást követő, teljes (nem részleges) év kell ebből a mutatóból."))
     makeChart("incRealChart",{type:"line",data:{labels:yearsL,datasets:realDs},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:x=>(x.raw>=0?"+":"")+NUM2.format(x.raw)+"%"}}},scales:{x:{ticks:{color:txtC,font:{size:10}},grid:{display:false}},y:{ticks:{color:txtC,font:{size:10},callback:v=>v+"%"},grid:{color:gridC}}}}});
 
     const eurSeries=person=>yearsL.map(y=>{const v=incVal(y,person,incMetric,incBrutNet);const fx=state.income[y].eurHuf;return (v!=null&&fx)?Math.round(v/fx):null;});
     const eurDs=[];
     if(incPerson==="household"){eurDs.push({label:state.owners.me,data:eurSeries("me"),borderColor:cssVar("--accent"),backgroundColor:"transparent",tension:.1,pointRadius:2,borderWidth:2,spanGaps:true});eurDs.push({label:state.owners.wife,data:eurSeries("wife"),borderColor:cssVar("--pos"),backgroundColor:"transparent",tension:.1,pointRadius:2,borderWidth:2,spanGaps:true});}
     else eurDs.push({label:incPerson==="me"?state.owners.me:state.owners.wife,data:eurSeries(incPerson),borderColor:cssVar("--accent"),backgroundColor:"transparent",tension:.1,pointRadius:2,borderWidth:2,spanGaps:true});
+    if(chartOrEmpty("incEurChart",eurDs.some(d=>d.data.some(v=>v!=null)),"Nincs adat ehhez a nézethez. Válts mutatót, vagy vigyél fel bér- és EUR/HUF adatot."))
     makeChart("incEurChart",{type:"line",data:{labels:yearsL,datasets:eurDs},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:txtC,font:{size:11}}},tooltip:{callbacks:{label:x=>x.dataset.label+": "+NUM.format(x.raw)+" €"}}},scales:{x:{ticks:{color:txtC,font:{size:10}},grid:{display:false}},y:{ticks:{color:txtC,font:{size:10},callback:v=>NUM.format(v)+" €"},grid:{color:gridC}}}}});
 
     makeChart("incMacroChart",{type:"bar",data:{labels:yearsL,datasets:[
