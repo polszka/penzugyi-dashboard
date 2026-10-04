@@ -311,7 +311,7 @@ const UNCAT="Nem kategorizált költség";
 const SAVE_CAT="Megtakarítás";
 const FIXED_DEFAULT=["Közműdíj","Élelmiszer","Biztosítás","Banki díj és hitel"];
 const CAT_VERSION=2;
-const APP_VERSION="1.4";
+const APP_VERSION="1.7";
 // Régi (korábbi verzió) kategórianevek -> UniCredit főkategóriák. Egyszeri automatikus átálláshoz.
 const OLD_TO_NEW={
   "Rezsi":"Közműdíj","Lakhatás":"Otthon","Háztartás":"Otthon",
@@ -358,10 +358,25 @@ const MERCHANT_MAP=[
 function merchantCat(desc){const d=String(desc||"").toLowerCase();for(let i=0;i<MERCHANT_MAP.length;i++){if(d.includes(MERCHANT_MAP[i][0]))return MERCHANT_MAP[i][1];}return "";}
 // UniCredit alkategóriák (fő -> [al]). Fokozatosan bővül.
 const UNICREDIT_SUBCATS={
-  "Otthon":["Háziállat és kellék","Közös költség","Háztartási kiadás","Lakás bérleti díj","Bútor és lakberendezés","Épület- és kertfenntartás","Ingatlan vagyonvédelem","Felújítás, karbantartás","Háziállat ellátás","Nyaraló","Egyéb otthon tétel"],
   "Élelmiszer":["Zöldség, gyümölcs"],
-  "Közlekedés":["Bérleti díj","Tömegközlekedés","Parkolás","Üzemanyag","Szerviz és karbantartás","Útdíj","Autó tisztítás","Kerékpár","Taxi","Egyéb közlekedési tétel"]
+  "Közműdíj":["Elektromos áram","Fűtés","Gáz","Víz és csatorna díj","TV, telefon, internet","Mobiltelefon","Egyéb közműdíj"],
+  "Otthon":["Háziállat és kellék","Közös költség","Háztartási kiadás","Lakás bérleti díj","Bútor és lakberendezés","Épület- és kertfenntartás","Ingatlan vagyonvédelem","Felújítás, karbantartás","Háziállat ellátás","Nyaraló","Egyéb otthon tétel"],
+  "Közlekedés":["Bérleti díj","Tömegközlekedés","Parkolás","Üzemanyag","Szerviz és karbantartás","Útdíj","Autó tisztítás","Kerékpár","Taxi","Egyéb közlekedési tétel"],
+  "Vásárlás és szolgáltatás":["Élelmiszer","Zöldség, gyümölcs","Ruházat és cipő","Ékszer és kiegészítő","Elektronikus eszköz","Film, könyv, zene, játék","Tisztítás és javítás","Ételrendelés","Szállítási díj","Média szolgáltatás","Előfizetés és digitális média","Egyéb előfizetés","Alkohol","Dohánytermék","Ajándék","Egyéb vásárlás és szolgáltatás"],
+  "Szabadidő":["Sportszer","Mozi, színház, koncert","Tagsági díj (edzőterem, sport klub)","Családi szabadidős program","Alapítvány és jótékonyság","Lottó és fogadás","Zene és hangszer","Rendezvény és ünnepség","Hobbi","Egyéb szabadidős tétel"],
+  "Szórakozás":["Gyorsétterem","Étterem","Bár, szórakozóhely","Cukrászda, kávézó","Egyéb szórakozási tétel"],
+  "Életmód":["Gyógyszertár, gyógyászati cikkek","Orvosi ellátás és egészségmegőrzés","Szépségápolás","Fodrász, borbély","Uszoda, masszázs, testápolás","Egyéb szépség és egészség"],
+  "Gyermekgondozás":["Allowance & pocket money","Tandíj és gyermekfelügyelet","Gyermek ruha és cipő","Játék","Zsebpénz","Szabadidő, tábor","Étkezés","Gyermekápolási termékek","Egyéb gyermekgondozási tétel"],
+  "Oktatás":["Student loan payment","Diákhitel","Oktatás, képzés","Tankönyv, tanszer","Egyéb oktatási tétel"],
+  "Utazás":["Repülőjegy, vonatjegy, autóbérlés","Szállás","Síelés és téli sportok","Utazási iroda","Egyéb utazási tétel"],
+  "Biztosítás":["Otthon biztosítás","Autó biztosítás","Életbiztosítás","Egészségbiztosítás","Egyéb biztosítás"],
+  "Banki díj és hitel":["Késedelmi kamat","Banki költség","Személyi kölcsön","Hitelkártya visszafizetés","Jelzáloghitel","Lízing","Egyéb banki díj és hitel"],
+  "Adó és bírság":["Adó","Gépjárműadó","Ingatlan adó","Illeték","Járulék","Bírság","Egyéb adó vagy bírság"],
+  "Készpénz":["Készpénzfelvétel","Készpénz (egyéb)"],
+  "Megtakarítás":["Rendszeres megtakarítás","Nyugdíj előtakarékosság","Egyéb megtakarítás"],
+  "Költségvetésben nem számolt tétel":["Beszedés","Saját számlák közötti átvezetés","Egyéb költségvetésben nem számolt tétel"]
 };
+const SUBCATS_VERSION=3;
 // MCC -> [főkategória, alkategória] a biztos esetekre
 const MCC_SUB={
   "5541":["Közlekedés","Üzemanyag"],"5542":["Közlekedés","Üzemanyag"],"5983":["Közlekedés","Üzemanyag"],
@@ -374,7 +389,18 @@ const MCC_SUB={
   "5940":["Közlekedés","Kerékpár"],
   "5995":["Otthon","Háziállat és kellék"],"0742":["Otthon","Háziállat ellátás"],
   "5712":["Otthon","Bútor és lakberendezés"],"5713":["Otthon","Bútor és lakberendezés"],"5714":["Otthon","Bútor és lakberendezés"],"5719":["Otthon","Bútor és lakberendezés"],
-  "5200":["Otthon","Felújítás, karbantartás"],"5211":["Otthon","Felújítás, karbantartás"],"5231":["Otthon","Felújítás, karbantartás"],"5251":["Otthon","Felújítás, karbantartás"],"5065":["Otthon","Felújítás, karbantartás"],"5261":["Otthon","Épület- és kertfenntartás"]
+  "5200":["Otthon","Felújítás, karbantartás"],"5211":["Otthon","Felújítás, karbantartás"],"5231":["Otthon","Felújítás, karbantartás"],"5251":["Otthon","Felújítás, karbantartás"],"5065":["Otthon","Felújítás, karbantartás"],"5261":["Otthon","Épület- és kertfenntartás"],
+  "5811":["Szórakozás","Étterem"],"5812":["Szórakozás","Étterem"],"5813":["Szórakozás","Bár, szórakozóhely"],"5814":["Szórakozás","Gyorsétterem"],
+  "4899":["Vásárlás és szolgáltatás","Előfizetés és digitális média"],"5815":["Vásárlás és szolgáltatás","Előfizetés és digitális média"],"5816":["Vásárlás és szolgáltatás","Előfizetés és digitális média"],"5817":["Vásárlás és szolgáltatás","Előfizetés és digitális média"],"5818":["Vásárlás és szolgáltatás","Előfizetés és digitális média"],
+  "5942":["Vásárlás és szolgáltatás","Film, könyv, zene, játék"],"5735":["Vásárlás és szolgáltatás","Film, könyv, zene, játék"],
+  "7832":["Szabadidő","Mozi, színház, koncert"],"5941":["Szabadidő","Sportszer"],
+  "5611":["Vásárlás és szolgáltatás","Ruházat és cipő"],"5621":["Vásárlás és szolgáltatás","Ruházat és cipő"],"5631":["Vásárlás és szolgáltatás","Ruházat és cipő"],"5651":["Vásárlás és szolgáltatás","Ruházat és cipő"],"5655":["Vásárlás és szolgáltatás","Ruházat és cipő"],"5661":["Vásárlás és szolgáltatás","Ruházat és cipő"],"5691":["Vásárlás és szolgáltatás","Ruházat és cipő"],
+  "5732":["Vásárlás és szolgáltatás","Elektronikus eszköz"],"5311":["Vásárlás és szolgáltatás","Elektronikus eszköz"],
+  "5945":["Gyermekgondozás","Játék"],"5641":["Gyermekgondozás","Gyermek ruha és cipő"],
+  "6011":["Készpénz","Készpénzfelvétel"],"6051":["Banki díj és hitel","Banki költség"],
+  "5912":["Életmód","Gyógyszertár, gyógyászati cikkek"],"5122":["Életmód","Gyógyszertár, gyógyászati cikkek"],"5292":["Életmód","Gyógyszertár, gyógyászati cikkek"],"5975":["Életmód","Gyógyszertár, gyógyászati cikkek"],"5976":["Életmód","Gyógyszertár, gyógyászati cikkek"],
+  "8011":["Életmód","Orvosi ellátás és egészségmegőrzés"],"8021":["Életmód","Orvosi ellátás és egészségmegőrzés"],"8031":["Életmód","Orvosi ellátás és egészségmegőrzés"],"8041":["Életmód","Orvosi ellátás és egészségmegőrzés"],"8042":["Életmód","Orvosi ellátás és egészségmegőrzés"],"8043":["Életmód","Orvosi ellátás és egészségmegőrzés"],"8049":["Életmód","Orvosi ellátás és egészségmegőrzés"],"8062":["Életmód","Orvosi ellátás és egészségmegőrzés"],"8071":["Életmód","Orvosi ellátás és egészségmegőrzés"],"8099":["Életmód","Orvosi ellátás és egészségmegőrzés"],
+  "7230":["Életmód","Fodrász, borbély"],"7297":["Életmód","Uszoda, masszázs, testápolás"],"7298":["Életmód","Uszoda, masszázs, testápolás"],"5977":["Életmód","Szépségápolás"]
 };
 const MERCHANT_SUB=[
   ["mol bubi",["Közlekedés","Kerékpár"]],
@@ -389,7 +415,23 @@ const MERCHANT_SUB=[
   ["közös költség",["Otthon","Közös költség"]],
   ["lakbér",["Otthon","Lakás bérleti díj"]],["albérlet",["Otthon","Lakás bérleti díj"]],["bérleti díj",["Otthon","Lakás bérleti díj"]],
   ["állatorvos",["Otthon","Háziállat ellátás"]],["állateledel",["Otthon","Háziállat és kellék"]],["kutyatáp",["Otthon","Háziállat és kellék"]],
-  ["zöldség",["Élelmiszer","Zöldség, gyümölcs"]],["piac",["Élelmiszer","Zöldség, gyümölcs"]],["gyümölcs",["Élelmiszer","Zöldség, gyümölcs"]]
+  ["zöldség",["Élelmiszer","Zöldség, gyümölcs"]],["piac",["Élelmiszer","Zöldség, gyümölcs"]],["gyümölcs",["Élelmiszer","Zöldség, gyümölcs"]],
+  ["netflix",["Vásárlás és szolgáltatás","Előfizetés és digitális média"]],["spotify",["Vásárlás és szolgáltatás","Előfizetés és digitális média"]],["youtube",["Vásárlás és szolgáltatás","Előfizetés és digitális média"]],["hbo",["Vásárlás és szolgáltatás","Előfizetés és digitális média"]],["disney",["Vásárlás és szolgáltatás","Előfizetés és digitális média"]],
+  ["mcdonald",["Szórakozás","Gyorsétterem"]],["kfc",["Szórakozás","Gyorsétterem"]],["burger king",["Szórakozás","Gyorsétterem"]],["starbucks",["Szórakozás","Cukrászda, kávézó"]],["cukrászda",["Szórakozás","Cukrászda, kávézó"]],["kávézó",["Szórakozás","Cukrászda, kávézó"]],["étterem",["Szórakozás","Étterem"]],["bisztró",["Szórakozás","Étterem"]],["pizza",["Szórakozás","Étterem"]],["langos",["Szórakozás","Gyorsétterem"]],
+  ["wolt",["Vásárlás és szolgáltatás","Ételrendelés"]],["foodpanda",["Vásárlás és szolgáltatás","Ételrendelés"]],["bolt food",["Vásárlás és szolgáltatás","Ételrendelés"]],
+  ["decathlon",["Szabadidő","Sportszer"]],["hervis",["Szabadidő","Sportszer"]],["intersport",["Szabadidő","Sportszer"]],
+  ["cinema",["Szabadidő","Mozi, színház, koncert"]],["mozi",["Szabadidő","Mozi, színház, koncert"]],["jegy.hu",["Szabadidő","Mozi, színház, koncert"]],
+  ["libri",["Vásárlás és szolgáltatás","Film, könyv, zene, játék"]],["bookline",["Vásárlás és szolgáltatás","Film, könyv, zene, játék"]],
+  ["alza",["Vásárlás és szolgáltatás","Elektronikus eszköz"]],["emag",["Vásárlás és szolgáltatás","Elektronikus eszköz"]],["media markt",["Vásárlás és szolgáltatás","Elektronikus eszköz"]],["mediamarkt",["Vásárlás és szolgáltatás","Elektronikus eszköz"]],["euronics",["Vásárlás és szolgáltatás","Elektronikus eszköz"]],
+  ["h&m",["Vásárlás és szolgáltatás","Ruházat és cipő"]],["zara",["Vásárlás és szolgáltatás","Ruházat és cipő"]],["deichmann",["Vásárlás és szolgáltatás","Ruházat és cipő"]],
+  ["főgáz",["Közműdíj","Gáz"]],["fogaz",["Közműdíj","Gáz"]],["tigáz",["Közműdíj","Gáz"]],["tigaz",["Közműdíj","Gáz"]],
+  ["vízmű",["Közműdíj","Víz és csatorna díj"]],["vizmu",["Közműdíj","Víz és csatorna díj"]],
+  ["alfa onkentes",["Megtakarítás","Nyugdíj előtakarékosság"]],["önkéntes",["Megtakarítás","Nyugdíj előtakarékosság"]],["onkentes",["Megtakarítás","Nyugdíj előtakarékosság"]],["nyugdíjpénztár",["Megtakarítás","Nyugdíj előtakarékosság"]],["nyugdijpenztar",["Megtakarítás","Nyugdíj előtakarékosság"]],
+  ["gyógyszertár",["Életmód","Gyógyszertár, gyógyászati cikkek"]],["gyogyszertar",["Életmód","Gyógyszertár, gyógyászati cikkek"]],["patika",["Életmód","Gyógyszertár, gyógyászati cikkek"]],["benu",["Életmód","Gyógyszertár, gyógyászati cikkek"]],
+  ["medicover",["Életmód","Orvosi ellátás és egészségmegőrzés"]],["klinika",["Életmód","Orvosi ellátás és egészségmegőrzés"]],["fogászat",["Életmód","Orvosi ellátás és egészségmegőrzés"]],
+  ["fodrász",["Életmód","Fodrász, borbély"]],["fodrasz",["Életmód","Fodrász, borbély"]],["borbély",["Életmód","Fodrász, borbély"]],
+  ["uszoda",["Életmód","Uszoda, masszázs, testápolás"]],["masszázs",["Életmód","Uszoda, masszázs, testápolás"]],["wellness",["Életmód","Uszoda, masszázs, testápolás"]],
+  ["gépjárműadó",["Adó és bírság","Gépjárműadó"]],["illeték",["Adó és bírság","Illeték"]],["járulék",["Adó és bírság","Járulék"]],["bírság",["Adó és bírság","Bírság"]]
 ];
 function merchantSub(desc){const d=String(desc||"").toLowerCase();for(let i=0;i<MERCHANT_SUB.length;i++){if(d.includes(MERCHANT_SUB[i][0]))return MERCHANT_SUB[i][1];}return null;}
 function subcatsOf(cat){return (state.subcats&&state.subcats[cat])||[];}
@@ -421,6 +463,7 @@ function freshState(){
       {id:uid(),name:"Babaváró hitel",principal:0,rate:0,term:0,start:monthOf(todayISO()),payment:0}
     ],
     investments:[],
+    properties:[],         // {id, name, value, purchasePrice, purchaseDate, growth, note}
     accounts:[],           // {id, name, type:'tbsz'|'szla'|'egyeb', openYear}
     snapshots:[],          // {date, value} portfolio value snapshots
     fxRates:[],            // {date, eurHuf, usdHuf} napi árfolyamok
@@ -429,6 +472,7 @@ function freshState(){
     planParams:{},         // year -> {surplus, liquidStart}
     fixedCategories:[...FIXED_DEFAULT],
     subcats:JSON.parse(JSON.stringify(UNICREDIT_SUBCATS)),
+    subcatsVersion:SUBCATS_VERSION,
     catVersion:CAT_VERSION,
     owners:{me:"Én",wife:"Feleség"}
   };
@@ -498,6 +542,17 @@ function migrateCategories(){
   autoCategorizeUncategorized();
   save();
   return true;
+}
+function ensureSubcats(){
+  if(!state.subcats)state.subcats={};
+  if(state.subcatsVersion===SUBCATS_VERSION)return;
+  Object.keys(UNICREDIT_SUBCATS).forEach(cat=>{
+    const cur=(state.subcats[cat]||[]).slice();
+    UNICREDIT_SUBCATS[cat].forEach(sc=>{ if(!cur.includes(sc))cur.push(sc); });
+    state.subcats[cat]=cur;
+  });
+  state.subcatsVersion=SUBCATS_VERSION;
+  save();
 }
 
 /* ---------------- theme ---------------- */
@@ -606,6 +661,81 @@ function investTotals(){
   let total=0,principal=0,bond=0,stock=0;
   state.investments.forEach(i=>{const c=investCurrentValue(i);total+=c.value;principal+=c.principal;if(i.type==="bond")bond+=c.value;else stock+=c.value;});
   return {total,principal,bond,stock,gain:total-principal};
+}
+/* ingatlan (property) */
+function propertyCurrentValue(p){
+  if((p.growth||0)>0 && (p.purchasePrice||0)>0 && p.purchaseDate){
+    const years=Math.max(0,daysBetween(p.purchaseDate,todayISO())/365);
+    return p.purchasePrice*Math.pow(1+(p.growth/100),years);
+  }
+  return p.value||0;
+}
+function propertyTotal(){return (state.properties||[]).reduce((a,p)=>a+propertyCurrentValue(p),0);}
+function propertyCard(){
+  const props=state.properties||[];
+  const card=el("div",{class:"card",style:"margin-top:14px"});
+  card.append(el("div",{style:"padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px"},
+    el("div",{},el("h3",{},"Ingatlanvagyon (becsült)"),el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"Kézi becslés; opcionálisan vételár + évi % alapján automatikusan indexelve. Csak közelítés.")),
+    el("button",{class:"btn ghost sm",onclick:()=>openProperty()},"＋ Ingatlan")));
+  if(!props.length){
+    card.append(el("div",{style:"padding:16px;color:var(--faint);font-size:12.5px"},"Még nincs ingatlan felvéve. Az „＋ Ingatlan” gombbal adhatsz hozzá (pl. lakás, becsült értékkel)."));
+    return card;
+  }
+  props.forEach(p=>{
+    const val=propertyCurrentValue(p);
+    const gain=(p.purchasePrice>0)?val-p.purchasePrice:null;
+    const indexed=((p.growth||0)>0&&(p.purchasePrice||0)>0&&p.purchaseDate);
+    card.append(el("div",{class:"list-item"},
+      el("div",{class:"li-main"},
+        el("div",{class:"li-name"},p.name||"Ingatlan"),
+        el("div",{class:"li-meta"},(indexed?"index-alapú becslés ("+NUM2.format(p.growth)+"%/év)":"kézi becslés")+(p.note?" · "+p.note:""))),
+      el("div",{class:"row",style:"gap:12px"},
+        el("div",{style:"text-align:right"},
+          el("div",{style:"font-weight:600"},money(val)),
+          gain!=null?el("div",{class:"li-meta "+(gain>=0?"pos":"neg")},(gain>=0?"+":"")+money(gain)+" a vételárhoz"):""),
+        el("button",{class:"btn ghost sm",onclick:()=>openProperty(p)},"Szerkeszt"),
+        el("button",{class:"iconbtn",onclick:()=>{if(confirm("Törlöd: "+(p.name||"ingatlan")+"?")){state.properties=state.properties.filter(x=>x.id!==p.id);save();renderOverview();}}},"✕"))));
+  });
+  return card;
+}
+function openProperty(existing){
+  const p=existing?Object.assign({},existing):{id:uid(),name:"",value:0,purchasePrice:0,purchaseDate:"",growth:0,note:""};
+  const nameI=el("input",{type:"text",value:p.name,placeholder:"pl. Lakás, IX. kerület"});
+  const valI=el("input",{type:"text",value:p.value||"",placeholder:"pl. 85 000 000"});
+  const ppI=el("input",{type:"text",value:p.purchasePrice||"",placeholder:"amennyiért vetted (opc.)"});
+  const pdI=el("input",{type:"date",value:p.purchaseDate||""});
+  const grI=el("input",{type:"text",value:p.growth||"",placeholder:"pl. 5 (opc.)"});
+  const noteI=el("input",{type:"text",value:p.note||"",placeholder:"megjegyzés (opc.)"});
+  const prev=el("div",{class:"note",style:"margin-top:12px"});
+  function upd(){
+    const tmp={value:parseHUNumber(valI.value)||0,purchasePrice:parseHUNumber(ppI.value)||0,purchaseDate:pdI.value,growth:parseHUNumber(grI.value)||0};
+    const val=propertyCurrentValue(tmp);
+    const indexed=(tmp.growth>0&&tmp.purchasePrice>0&&tmp.purchaseDate);
+    prev.innerHTML="";
+    const rows=[el("div",{},"Beszámított érték: ",el("b",{},money(val))," ",indexed?"(index-alapú)":"(kézi)")];
+    if(tmp.purchasePrice>0){const g=val-tmp.purchasePrice;rows.push(el("div",{style:"margin-top:2px"},"Változás a vételárhoz: ",el("b",{class:g>=0?"pos":"neg"},(g>=0?"+":"")+money(g))));}
+    prev.append(el("span",{class:"em"},"∑"),el("div",{},...rows));
+  }
+  [valI,ppI,pdI,grI].forEach(x=>x.addEventListener("input",upd));
+  const body=el("div",{},
+    el("div",{class:"note"},el("span",{class:"em"},"ℹ"),"Add meg a becsült jelenlegi értéket. Ha kitöltöd a vételárat + vétel dátumát + egy évi becsült drágulás %-ot, abból automatikusan indexelem a hozzávetőleges mai értéket (a kézi érték helyett). Ez csak közelítés – pontos értékért értékbecslés kell."),
+    el("div",{class:"formgrid",style:"margin-top:12px"},
+      el("div",{class:"field full"},el("label",{},"Megnevezés"),nameI),
+      field2("Becsült jelenlegi érték (Ft)",valI),
+      field2("Vételár (Ft, opc.)",ppI),
+      field2("Vétel dátuma (opc.)",pdI),
+      field2("Évi becsült drágulás (%, opc.)",grI),
+      el("div",{class:"field full"},el("label",{},"Megjegyzés"),noteI)),
+    prev);
+  setTimeout(upd,0);
+  showModal(existing?"Ingatlan szerkesztése":"Új ingatlan",body,[
+    {label:"Mégse",cls:"ghost",onclick:closeModal},
+    {label:existing?"Mentés":"Hozzáadás",cls:"",onclick:()=>{
+      p.name=nameI.value.trim()||"Ingatlan";p.value=parseHUNumber(valI.value)||0;p.purchasePrice=parseHUNumber(ppI.value)||0;p.purchaseDate=pdI.value;p.growth=parseHUNumber(grI.value)||0;p.note=noteI.value.trim();
+      if(!state.properties)state.properties=[];
+      if(existing){const idx=state.properties.findIndex(x=>x.id===p.id);if(idx>=0)state.properties[idx]=p;}else state.properties.push(p);
+      save();closeModal();renderOverview();toast("Ingatlan mentve");
+    }}]);
 }
 function accountTotals(accId){
   let total=0,principal=0;
@@ -724,16 +854,20 @@ function renderOverview(){
 
   const it=investTotals();
   const loansRemaining=state.loans.reduce((a,l)=>a+loanSchedule(l).remaining,0);
-  const net=it.total-loansRemaining;
+  const propTotal=propertyTotal();
+  const net=it.total+propTotal-loansRemaining;
   const curYear=String(new Date().getFullYear());
   const savedThisYear=months.filter(m=>m.startsWith(curYear)).reduce((a,m)=>a+monthlySavings(m,ovOwner),0);
   const tiles=el("div",{class:"grid tiles",style:"margin-top:14px"});
   tiles.append(
-    tile("Nettó vagyon (bef. − hitel)",money(net),(net>=0?"pos":"neg"),"Becsült, a megadott adatokból"),
+    tile("Nettó vagyon (ingatlan + bef. − hitel)",money(net),(net>=0?"pos":"neg"),"Becsült, a megadott adatokból"),
+    tile("Ingatlanvagyon (becsült)",money(propTotal),"accent",(state.properties||[]).length+" ingatlan"),
     tile("Befektetések értéke",money(it.total),(it.gain>=0?"pos":"neg"),(it.gain>=0?"+":"")+money(it.gain)+" hozam"),
     tile("Fennálló hiteltartozás",money(loansRemaining),"neg",state.loans.map(l=>l.name).filter(Boolean).join(" + ")||"—"),
     tile(curYear+" – félretett",money(savedThisYear),"accent","„"+SAVE_CAT+"” kategória"));
   c.append(tiles);
+
+  c.append(propertyCard());
 
   const chartsRow=el("div",{class:"grid",style:"grid-template-columns:1fr 1fr;margin-top:14px"});
   chartsRow.append(
@@ -1755,7 +1889,7 @@ function renderPlan(){
   state.plans.forEach(p=>years.add(String(p.year)));
   const yearList=Array.from(years).sort();
   const head=el("div",{class:"page-h"},
-    el("div",{},el("h1",{},"Éves terv"),el("div",{class:"sub"},"Tervezett nagyobb kiadások és a többlet felosztása rövid/hosszú távra")),
+    el("div",{},el("h1",{},"Éves terv"),el("div",{class:"sub"},"Mennyit tudsz befektetni a havi maradványból – a tervezett kiadások megtakarítási terve mellett")),
     el("div",{class:"row"},
       (()=>{const s=el("select",{onchange:e=>{planYear=e.target.value;renderPlan();}});yearList.forEach(y=>s.append(el("option",{value:y,...(y===planYear?{selected:"selected"}:{})},y)));s.value=planYear;return s;})(),
       el("button",{class:"btn",onclick:()=>openPlanItem()},"＋ Tervezett kiadás")));
@@ -1763,109 +1897,136 @@ function renderPlan(){
 
   const yr=planYear;
   const pp=state.planParams[yr]||(state.planParams[yr]={surplus:0,liquidStart:0});
+  const nowYM=monthOf(todayISO());
 
   const yMonths=availableMonths().filter(m=>m.startsWith(yr));
-  let inc=0,exp=0;yMonths.forEach(m=>{const s=sums(txFor(m,"all"));inc+=s.inc;exp+=s.exp;});
-  const avgSurplus=yMonths.length?Math.round((inc+exp)/yMonths.length):0;
+  const dataAvg=yMonths.length?Math.round(yMonths.reduce((a,m)=>a+sums(txFor(m,"all")).net,0)/yMonths.length):0;
+  const monthlyLeftover=(pp.surplus&&pp.surplus>0)?pp.surplus:dataAvg;
 
   const paramCard=el("div",{class:"card pad",style:"margin-bottom:14px"});
-  paramCard.append(el("h3",{},"Havi megtakarítható többlet"),el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"Mennyit tudsz jó hónapban félretenni. Ebből számolom az éves keretet."));
-  const surI=el("input",{type:"text",value:pp.surplus||"",placeholder:"pl. 250 000"});
+  paramCard.append(el("h3",{},"Havi maradvány (befektethető alap)"),el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"Alapból az adataidból számolom: az adott évben havonta átlagosan ennyi pénz marad (bevétel − kiadás). Felül is írhatod."));
+  const srcChip=el("span",{class:"chip"},(pp.surplus&&pp.surplus>0)?("Kézi érték: "+money(pp.surplus)):("Adatokból: "+money(dataAvg)+(yMonths.length?(" ("+yMonths.length+" hónap átlaga)"):" (még nincs adat)")));
+  const surI=el("input",{type:"text",value:pp.surplus||"",placeholder:"üres = adatokból ("+money(dataAvg)+")"});
   surI.addEventListener("change",e=>{pp.surplus=parseHUNumber(e.target.value)||0;save();renderPlan();});
-  const liqI=el("input",{type:"text",value:pp.liquidStart||"",placeholder:"jelenlegi likvid tartalék (opc.)"});
-  liqI.addEventListener("change",e=>{pp.liquidStart=parseHUNumber(e.target.value)||0;save();renderPlan();});
-  paramCard.append(el("div",{class:"formgrid",style:"margin-top:12px"},
-    field2("Havi többlet (Ft)",surI),
-    field2("Kezdő likvid tartalék (Ft, opc.)",liqI)));
-  if(avgSurplus>0){
-    paramCard.append(el("div",{class:"row",style:"margin-top:10px;align-items:center"},
-      el("span",{class:"chip"},"Adatokból számolt havi átlagos többlet: "+money(avgSurplus)),
-      el("button",{class:"btn ghost sm",onclick:()=>{pp.surplus=avgSurplus;save();renderPlan();}},"Használom ezt")));
-  }
+  paramCard.append(el("div",{class:"row",style:"margin-top:10px"},srcChip),el("div",{class:"formgrid",style:"margin-top:10px"},field2("Havi maradvány felülírása (opc., Ft)",surI)));
   c.append(paramCard);
 
   const plans=state.plans.filter(p=>String(p.year)===yr).sort((a,b)=>String(a.month||"").localeCompare(String(b.month||"")));
   const totalPlanned=plans.reduce((a,p)=>a+(p.amount||0),0);
-  const annualSurplus=(pp.surplus||0)*12;
-  const longTerm=annualSurplus-totalPlanned;
-  const nowYM=monthOf(todayISO());
-  const remainingPlanned=plans.filter(p=>!p.month||p.month>=nowYM).reduce((a,p)=>a+(p.amount||0),0);
+  const activePlans=plans.filter(p=>!p.month||p.month>=nowYM);
+  const totalMonthlyNeed=Math.round(activePlans.reduce((a,p)=>a+planMonthlyNeed(p).monthly,0));
+  const investable=monthlyLeftover-totalMonthlyNeed;
 
   const tiles=el("div",{class:"grid tiles",style:"margin-bottom:14px"});
   tiles.append(
-    tile("Éves többlet (12 hó)",money(annualSurplus),"pos","havi "+money(pp.surplus||0)),
-    tile("Tervezett kiadások ("+yr+")",money(totalPlanned),"neg",plans.length+" tétel"),
-    tile("Rövid távon lekötve",money(remainingPlanned),"warn","a hátralévő tervezett kiadásokra"),
-    tile("Hosszú távra fordítható",money(Math.max(0,longTerm)),(longTerm>=0?"pos":"neg"),longTerm>=0?"a többletből szabadon":"⚠ "+money(-longTerm)+" hiányzik"));
+    tile("Havi maradvány",money(monthlyLeftover),monthlyLeftover>=0?"pos":"neg","bevétel − kiadás"),
+    tile("Tervezett megtakarítás / hó",money(totalMonthlyNeed),"warn",activePlans.length+" aktív cél"),
+    tile("Szabadon befektethető / hó",money(investable),(investable>=0?"pos":"neg"),investable>=0?"ennyi mehet havonta hosszú távra":"⚠ nem fér bele a havi keretbe"),
+    tile("Tervezett kiadások ("+yr+")",money(totalPlanned),"neg",plans.length+" tétel"));
   c.append(tiles);
 
-  if(longTerm<0){
+  if(investable<0){
     c.append(el("div",{class:"note warn",style:"margin-bottom:14px"},el("span",{class:"em"},"⚠"),
-      el("div",{},`A tervezett kiadások ${money(-longTerm)}-tal meghaladják az éves többletet. Vagy a meglévő megtakarításból fedezed a különbözetet, vagy csökkenteni / halasztani kell valamelyik tételt.`)));
+      el("div",{},`A tervezett célok havi megtakarítási igénye (${money(totalMonthlyNeed)}) meghaladja a havi maradványt (${money(monthlyLeftover)}). Növeld a megtakarítási időszakot valamelyik célnál, adj meg induló összeget, vagy csökkentsd/halaszd a célt.`)));
   } else {
     c.append(el("div",{class:"note",style:"margin-bottom:14px"},el("span",{class:"em"},"✓"),
-      el("div",{},`Az éves többletből (${money(annualSurplus)}) a tervezett kiadások (${money(totalPlanned)}) levonása után kb. ${money(longTerm)} fordítható hosszú távú, kötöttebb megtakarításba. A tervezett kiadásokra szánt részt érdemes likviden (rövid távon) tartani, mert év közben szükség lesz rá.`)));
+      el("div",{},`A havi maradványból a tervezett célok megtakarítása (${money(totalMonthlyNeed)}/hó) után kb. ${money(investable)}/hó fordítható szabadon hosszú távú befektetésre.`)));
   }
 
   c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},
-    el("h3",{},"Likviditás az év során"),
-    el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"Havi többlet (be), tervezett kiadás (ki) és a futó likvid egyenleg. Ha a vonal negatívba fordul, ott átmenetileg nem lesz elég a felhalmozott többlet."),
+    el("h3",{},"Havi bontás az év során"),
+    el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"Havi maradvány (adatokból / projektált), a tervezett célokra félreteendő összeg, és a szabadon befektethető rész."),
     el("div",{class:"chart-box",style:"margin-top:10px"},el("canvas",{id:"planChart"}))));
 
   if(plans.length){
     const card=el("div",{class:"card"});
-    card.append(el("div",{style:"padding:12px 16px;border-bottom:1px solid var(--border)"},el("h3",{},"Tervezett kiadások – "+yr)));
+    card.append(el("div",{style:"padding:12px 16px;border-bottom:1px solid var(--border)"},el("h3",{},"Tervezett kiadások és megtakarítási terv – "+yr)));
     plans.forEach(p=>{
-      const when=p.month||"—";
+      const n=planMonthlyNeed(p);
       const ahead=(!p.month||p.month>=nowYM);
+      const meta=(p.month||"—")+" · "+n.period+" hó alatt"+((p.startAmount||0)>0?" · induló "+money(p.startAmount):"")+(p.category?" · "+p.category:"");
       card.append(el("div",{class:"list-item"},
         el("div",{class:"li-main"},
           el("div",{class:"li-name"},p.name||"(névtelen)"),
-          el("div",{class:"li-meta"},when+(p.category?" · "+p.category:"")+(p.note?" · "+p.note:""))),
+          el("div",{class:"li-meta"},meta)),
         el("div",{class:"row",style:"gap:12px"},
-          el("div",{style:"text-align:right"},el("div",{style:"font-weight:600"},money(p.amount)),el("div",{class:"li-meta "+(ahead?"warn":"")},ahead?"még hátravan":"elszámolt")),
+          el("div",{style:"text-align:right"},
+            el("div",{style:"font-weight:600"},money(p.amount)),
+            el("div",{class:"li-meta "+(ahead?"accent":"")},ahead?("havi "+money(Math.round(n.monthly))):"elszámolt")),
           el("button",{class:"btn ghost sm",onclick:()=>openPlanItem(p)},"Szerkeszt"),
           el("button",{class:"iconbtn",onclick:()=>{if(confirm("Törlöd: "+p.name+"?")){state.plans=state.plans.filter(x=>x.id!==p.id);save();renderPlan();}}},"✕"))));
     });
     c.append(card);
   } else {
-    c.append(emptyState("Még nincs tervezett kiadás","Vedd fel az évre tervezett nagyobb kiadásokat (pl. nyaralás, autó, felújítás), és látni fogod, mennyi többlet köthető le hosszú távra.","＋ Tervezett kiadás",()=>openPlanItem()));
+    c.append(emptyState("Még nincs tervezett kiadás","Vedd fel az évre tervezett nagyobb kiadásokat (pl. nyaralás, autó, felújítás). Megadhatod a célösszeget, a határidőt, az induló összeget és a megtakarítási időszakot – kiszámolom, havonta mennyit kell félretenni rá.","＋ Tervezett kiadás",()=>openPlanItem()));
   }
 
   setTimeout(()=>{
-    const labels=[],inflow=[],outflow=[],running=[];
-    let bal=pp.liquidStart||0;
+    const labels=[],leftoverArr=[],needArr=[],freeArr=[];
     for(let mo=1;mo<=12;mo++){
       const ym=yr+"-"+String(mo).padStart(2,"0");
-      const out=plans.filter(p=>p.month===ym).reduce((a,p)=>a+(p.amount||0),0);
-      bal+=(pp.surplus||0)-out;
-      labels.push(ym.slice(2));inflow.push(pp.surplus||0);outflow.push(-out);running.push(Math.round(bal));
+      const hasData=yMonths.includes(ym);
+      const left=hasData?Math.round(sums(txFor(ym,"all")).net):monthlyLeftover;
+      let nd=0;
+      plans.forEach(p=>{const n=planMonthlyNeed(p);if(ym>=n.saveStart&&ym<=n.target&&n.target>=nowYM)nd+=n.monthly;});
+      nd=Math.round(nd);
+      labels.push(ym.slice(2));leftoverArr.push(left);needArr.push(nd);freeArr.push(left-nd);
     }
     makeChart("planChart",{type:"bar",data:{labels,datasets:[
-      {type:"bar",label:"Havi többlet",data:inflow,backgroundColor:cssVar("--pos")},
-      {type:"bar",label:"Tervezett kiadás",data:outflow,backgroundColor:cssVar("--neg")},
-      {type:"line",label:"Futó likvid egyenleg",data:running,borderColor:cssVar("--accent"),backgroundColor:"transparent",tension:.1,pointRadius:2,borderWidth:2}
+      {type:"bar",label:"Havi maradvány",data:leftoverArr,backgroundColor:cssVar("--pos")},
+      {type:"bar",label:"Tervezett megtakarítás",data:needArr,backgroundColor:cssVar("--warn")},
+      {type:"line",label:"Szabadon befektethető",data:freeArr,borderColor:cssVar("--accent"),backgroundColor:"transparent",tension:.1,pointRadius:2,borderWidth:2}
     ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:cssVar("--muted"),font:{size:11}}},tooltip:{callbacks:{label:x=>x.dataset.label+": "+money(x.raw)}}},
       scales:{x:{ticks:{color:cssVar("--muted"),font:{size:10}},grid:{display:false}},y:{ticks:{color:cssVar("--muted"),font:{size:10},callback:v=>NUM.format(v)},grid:{color:cssVar("--border")}}}}});
   },0);
 }
+function planMonthlyNeed(p){
+  const nowYM=monthOf(todayISO());
+  const target=p.month||nowYM;
+  const remaining=Math.max(0,(p.amount||0)-(p.startAmount||0));
+  let period;
+  if(p.savePeriod&&p.savePeriod>0)period=Math.round(p.savePeriod);
+  else period=Math.max(1,monthIdx(target)-monthIdx(nowYM)+1);
+  const monthly=period>0?remaining/period:remaining;
+  const saveStart=addMonthsYM(target,-(period-1));
+  return {period,monthly,remaining,target,saveStart};
+}
 function openPlanItem(existing){
-  const p=existing?Object.assign({},existing):{id:uid(),year:planYear,name:"",amount:0,month:planYear+"-"+String(new Date().getMonth()+1).padStart(2,"0"),category:"",note:""};
+  const p=existing?Object.assign({},existing):{id:uid(),year:planYear,name:"",amount:0,month:planYear+"-"+String(new Date().getMonth()+1).padStart(2,"0"),category:"",note:"",startAmount:0,savePeriod:0};
   const nameI=el("input",{type:"text",value:p.name,placeholder:"pl. Nyaralás, autó szerviz, felújítás"});
   const amtI=el("input",{type:"text",value:p.amount||"",placeholder:"pl. 800 000"});
   const monthI=el("input",{type:"month",value:p.month||planYear+"-01"});
+  const startI=el("input",{type:"text",value:p.startAmount||"",placeholder:"már félretett összeg (opc.)"});
+  const periodI=el("input",{type:"text",value:p.savePeriod||"",placeholder:"pl. 12 (üres = mostantól a céldátumig)"});
   const catSel=el("select",{});catSel.append(el("option",{value:""},"— nincs —"));state.categories.forEach(cat=>catSel.append(el("option",{value:cat,...(cat===p.category?{selected:"selected"}:{})},cat)));
   const noteI=el("input",{type:"text",value:p.note||"",placeholder:"megjegyzés (opc.)"});
-  const body=el("div",{class:"formgrid"},
-    el("div",{class:"field full"},el("label",{},"Megnevezés"),nameI),
-    field2("Összeg (Ft)",amtI),
-    field2("Mikor (év-hó)",monthI),
-    field2("Kategória (opc.)",catSel),
-    el("div",{class:"field full"},el("label",{},"Megjegyzés"),noteI));
+  const prev=el("div",{class:"note",style:"margin-top:12px"});
+  function upd(){
+    const tmp={amount:parseHUNumber(amtI.value)||0,startAmount:parseHUNumber(startI.value)||0,savePeriod:Math.round(parseHUNumber(periodI.value)||0),month:monthI.value};
+    const n=planMonthlyNeed(tmp);
+    prev.innerHTML="";
+    prev.append(el("span",{class:"em"},"∑"),el("div",{},
+      el("div",{},"Megtakarítási időszak: ",el("b",{},n.period+" hónap")),
+      el("div",{style:"margin-top:2px"},"Havi megtakarítás szükséglet: ",el("b",{class:"accent"},money(Math.round(n.monthly)))),
+      el("div",{style:"margin-top:2px;color:var(--muted)"},"Még összegyűjtendő: "+money(n.remaining)+((tmp.startAmount||0)>0?(" (cél "+money(tmp.amount)+" − induló "+money(tmp.startAmount)+")"):""))));
+  }
+  [amtI,startI,periodI,monthI].forEach(x=>x.addEventListener("input",upd));
+  const body=el("div",{},
+    el("div",{class:"note"},el("span",{class:"em"},"ℹ"),"Add meg a célösszeget és a határidőt. Ha megadsz induló összeget (amivel indítod) és/vagy egy megtakarítási időszakot (pl. 12 hónap), kiszámolom a havi megtakarítási szükségletet. Időszak nélkül a mostantól a céldátumig tartó hónapokkal számolok."),
+    el("div",{class:"formgrid",style:"margin-top:12px"},
+      el("div",{class:"field full"},el("label",{},"Megnevezés"),nameI),
+      field2("Célösszeg (Ft)",amtI),
+      field2("Mikorra kell (év-hó)",monthI),
+      field2("Induló összeg (Ft, opc.)",startI),
+      field2("Megtakarítási időszak (hónap, opc.)",periodI),
+      field2("Kategória (opc.)",catSel),
+      el("div",{class:"field full"},el("label",{},"Megjegyzés"),noteI)),
+    prev);
+  setTimeout(upd,0);
   showModal(existing?"Tervezett kiadás szerkesztése":"Tervezett kiadás felvitele",body,[
     {label:"Mégse",cls:"ghost",onclick:closeModal},
     {label:existing?"Mentés":"Hozzáadás",cls:"",onclick:()=>{
-      p.name=nameI.value.trim()||"Tervezett kiadás";p.amount=parseHUNumber(amtI.value)||0;p.month=monthI.value;p.year=(monthI.value||planYear+"-01").slice(0,4);p.category=catSel.value;p.note=noteI.value.trim();
+      p.name=nameI.value.trim()||"Tervezett kiadás";p.amount=parseHUNumber(amtI.value)||0;p.month=monthI.value;p.year=(monthI.value||planYear+"-01").slice(0,4);p.category=catSel.value;p.note=noteI.value.trim();p.startAmount=parseHUNumber(startI.value)||0;p.savePeriod=Math.round(parseHUNumber(periodI.value)||0);
       if(existing){const idx=state.plans.findIndex(x=>x.id===p.id);if(idx>=0)state.plans[idx]=p;}else state.plans.push(p);
       save();closeModal();planYear=p.year;renderPlan();toast("Mentve");
     }}]);
@@ -2052,6 +2213,7 @@ function boot(){
   if(typeof Papa==="undefined")console.warn("PapaParse nem töltött be");
   let migrated=false;
   try{ migrated=migrateCategories(); }catch(e){ console.warn("migrate failed",e); }
+  try{ ensureSubcats(); }catch(e){ console.warn("ensureSubcats failed",e); }
   initTheme();
   buildNav();
   const av=$("#appVer");if(av)av.textContent="verzió "+APP_VERSION;
