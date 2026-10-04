@@ -311,7 +311,7 @@ const UNCAT="Nem kategorizált költség";
 const SAVE_CAT="Megtakarítás";
 const FIXED_DEFAULT=["Közműdíj","Élelmiszer","Biztosítás","Banki díj és hitel"];
 const CAT_VERSION=2;
-const APP_VERSION="2.5";
+const APP_VERSION="2.6";
 // KSH éves átlagos infláció (%) – hivatalos; 2025:4,4; 2026 becslés
 const INFLATION_DEFAULT={"2006":3.9,"2007":8.0,"2008":6.1,"2009":4.2,"2010":4.9,"2011":3.9,"2012":5.7,"2013":1.7,"2014":-0.2,"2015":-0.1,"2016":0.4,"2017":2.4,"2018":2.8,"2019":3.4,"2020":3.3,"2021":5.1,"2022":14.5,"2023":17.6,"2024":3.7,"2025":4.4,"2026":4.5};
 // EUR/HUF éves átlag (közelítő, MNB-alapú); 2025/2026 becslés
@@ -564,28 +564,48 @@ async function syncPushNow(){
   catch(e){updateSyncStatus("Szinkron hiba: "+e.message,true);console.warn("sync push",e);}
 }
 function scheduleSync(){if(!syncEnabled()||!_syncReady)return;clearTimeout(_syncTimer);_syncTimer=setTimeout(syncPushNow,2500);}
-async function syncPullAndLoad(force){
-  const row=await sbPull();
-  if(!row){_syncReady=true;return {empty:true};}
-  let obj;try{obj=await decState(row.data,syncCfg.pass);}catch(e){throw new Error("Visszafejtés sikertelen – rossz titkosítási jelszó?");}
-  const cloudT=new Date(row.updated_at).getTime();
-  if(!force && stateHasData(state) && syncCfg.lastSync && syncCfg.lastSync>cloudT){_syncReady=true;return {localNewer:true,cloudT};}
+function loadCloudObj(obj,cloudT){
+  try{const cur=localStorage.getItem(LS_KEY);if(cur)localStorage.setItem(LS_KEY+"_backup",JSON.stringify({at:Date.now(),data:cur}));}catch(e){}
   const fresh=freshState();state=Object.assign(fresh,obj,{owners:Object.assign(fresh.owners,obj.owners||{})});state.catVersion=obj.catVersion;state.subcatsVersion=obj.subcatsVersion;
-  save();syncCfg.lastSync=cloudT;saveSyncCfg();_syncReady=true;return {loaded:true,cloudT};
+  try{ensureSubcats();}catch(e){}
+  _syncReady=true;save();syncCfg.lastSync=cloudT;saveSyncCfg();
+}
+async function syncReconcile(){
+  const row=await sbPull();
+  if(!row){_syncReady=true;if(stateHasData(state)){await syncPushNow();}else{updateSyncStatus("Bejelentkezve (a felhő még üres).");}return;}
+  let obj;try{obj=await decState(row.data,syncCfg.pass);}catch(e){updateSyncStatus("Rossz titkosítási jelszó – nem töltöttem le semmit.",true);throw new Error("Rossz titkosítási jelszó");}
+  const cloudT=new Date(row.updated_at).getTime();
+  if(!stateHasData(state)){loadCloudObj(obj,cloudT);go(currentPage);updateSyncStatus("Felhőből betöltve: "+new Date(cloudT).toLocaleString("hu-HU"));toast("Adatok szinkronizálva a felhőből");return;}
+  if(syncCfg.lastSync&&cloudT<=syncCfg.lastSync){_syncReady=true;updateSyncStatus("Szinkronban – a helyi adat aktuális.");scheduleSync();return;}
+  _syncReady=true;
+  const when=new Date(cloudT).toLocaleString("hu-HU");
+  if(confirm("A felhőben újabb mentés van ("+when+").\n\nBetöltöd? FIGYELEM: a jelenlegi helyi adatok felülíródnak.\nMégse = a helyi adat marad meg (és a következő mentéskor ez kerül a felhőbe).")){
+    loadCloudObj(obj,cloudT);go(currentPage);toast("Felhőből betöltve");
+  } else {updateSyncStatus("Helyi adat megtartva.");scheduleSync();}
+}
+async function syncForceDownload(){
+  const row=await sbPull();
+  if(!row){toast("Nincs felhős adat");return;}
+  let obj;try{obj=await decState(row.data,syncCfg.pass);}catch(e){toast("Rossz titkosítási jelszó");return;}
+  if(stateHasData(state)&&!confirm("Letöltöd a felhőből? A jelenlegi helyi adatok felülíródnak (előtte készül egy helyi biztonsági másolat)."))return;
+  loadCloudObj(obj,new Date(row.updated_at).getTime());go(currentPage);toast("Letöltve a felhőből");
+}
+function restoreLocalBackup(){
+  try{const b=localStorage.getItem(LS_KEY+"_backup");const parsed=b?JSON.parse(b):null;if(!parsed||!parsed.data){toast("Nincs helyi biztonsági másolat");return;}
+    if(!confirm("Visszaállítod a szinkron előtti helyi állapotot? ("+new Date(parsed.at).toLocaleString("hu-HU")+")\nEz felülírja a mostani helyi adatot."))return;
+    localStorage.setItem(LS_KEY,parsed.data);state=load();try{ensureSubcats();}catch(e){}go(currentPage);toast("Helyi állapot visszaállítva");
+  }catch(e){toast("Visszaállítás hiba");}
 }
 async function syncLogin(opts){
-  // opts: {email,pass,passphrase,remember,signup}
   if(!syncConfigured())throw new Error("Előbb add meg a Supabase URL-t és kulcsot");
-  if(opts.signup){const su=await sbSignup(opts.email,opts.pass);if(!su.access_token){/* e-mail megerősítés kérhet; próbáljunk belépni */}}
+  if(opts.signup){const su=await sbSignup(opts.email,opts.pass);if(!su.access_token){}}
   const auth=await sbAuthPassword(opts.email,opts.pass);
   if(!auth.access_token)throw new Error("Nincs hozzáférési token (e-mail megerősítés bekapcsolva?)");
   syncCfg.access=auth.access_token;syncCfg.refresh=auth.refresh_token;syncCfg.expiry=Date.now()+(auth.expires_in||3600)*1000;
   syncCfg.uid=(auth.user&&auth.user.id)||syncCfg.uid;syncCfg.email=opts.email;syncCfg.remember=opts.remember!==false;syncCfg.pass=opts.passphrase;
   saveSyncCfg();
-  // első szinkron: ha felhő üres, de helyi van -> feltöltjük; különben felhő tölt
-  const res=await syncPullAndLoad(false);
-  if(res.empty){ if(stateHasData(state)){await syncPushNow();} else {_syncReady=true;} return {seeded:res.empty&&stateHasData(state)}; }
-  return res;
+  await syncReconcile();
+  return {};
 }
 function syncLogout(){
   clearTimeout(_syncTimer);_syncReady=false;
@@ -593,14 +613,9 @@ function syncLogout(){
   saveSyncCfg();
 }
 async function syncBootstrap(){
-  if(!syncLoggedIn()){return;}
+  if(!syncLoggedIn())return;
   if(!syncCfg.pass){updateSyncStatus("Add meg a titkosítási jelszót a szinkronhoz (Beállítások).",true);return;}
-  try{
-    const res=await syncPullAndLoad(false);
-    if(res&&res.loaded){try{ensureSubcats();}catch(e){}go(currentPage);updateSyncStatus("Felhőből frissítve: "+new Date(res.cloudT).toLocaleString("hu-HU"));toast("Adatok szinkronizálva a felhőből");}
-    else if(res&&res.localNewer){_syncReady=true;scheduleSync();updateSyncStatus("Helyi adat újabb – feltöltés folyamatban…");}
-    else {_syncReady=true;updateSyncStatus(syncCfg.lastSync?("Szinkronizálva: "+new Date(syncCfg.lastSync).toLocaleString("hu-HU")):"Bejelentkezve");}
-  }catch(e){updateSyncStatus("Szinkron: "+e.message,true);console.warn("bootstrap",e);}
+  try{await syncReconcile();}catch(e){updateSyncStatus("Szinkron: "+e.message,true);console.warn("bootstrap",e);}
 }
 function normDesc(d){return String(d||"").toLowerCase().replace(/\s+/g," ").replace(/[0-9]{6,}/g,"").trim().slice(0,60);}
 function applyRules(txn){return categorizeTxn(txn).cat;}
@@ -2505,7 +2520,8 @@ function renderSettings(){
     syncCard.append(el("div",{id:"syncStatus",style:"margin:10px 0;font-size:12.5px;color:var(--muted)"},syncCfg.lastMsg||(syncCfg.lastSync?("Szinkronizálva: "+new Date(syncCfg.lastSync).toLocaleString("hu-HU")):"")));
     syncCard.append(el("div",{class:"row"},
       el("button",{class:"btn",onclick:async()=>{updateSyncStatus("Feltöltés…");await syncPushNow();}},"⭱ Feltöltés most"),
-      el("button",{class:"btn ghost",onclick:async()=>{try{updateSyncStatus("Letöltés…");const r=await syncPullAndLoad(true);if(r.loaded){go(currentPage);toast("Letöltve a felhőből");}else toast("Nincs felhős adat");updateSyncStatus(syncCfg.lastSync?("Szinkronizálva: "+new Date(syncCfg.lastSync).toLocaleString("hu-HU")):"");}catch(e){toast(e.message);updateSyncStatus(e.message,true);}}},"⭳ Letöltés most"),
+      el("button",{class:"btn ghost",onclick:async()=>{try{updateSyncStatus("Letöltés…");await syncForceDownload();updateSyncStatus(syncCfg.lastSync?("Szinkronizálva: "+new Date(syncCfg.lastSync).toLocaleString("hu-HU")):"");}catch(e){toast(e.message);updateSyncStatus(e.message,true);}}},"⭳ Letöltés most"),
+      el("button",{class:"btn ghost",onclick:restoreLocalBackup},"↩ Helyi mentés visszaállítása"),
       el("button",{class:"btn danger",onclick:()=>{if(confirm("Kijelentkezel? A helyi adat megmarad, de a szinkron leáll ezen az eszközön.")){syncLogout();renderSettings();toast("Kijelentkezve");}}},"Kijelentkezés")));
   } else {
     const urlI=el("input",{type:"text",value:syncCfg.url||"",placeholder:"https://xxxx.supabase.co"});
