@@ -311,7 +311,7 @@ const UNCAT="Nem kategorizált költség";
 const SAVE_CAT="Megtakarítás";
 const FIXED_DEFAULT=["Közműdíj","Élelmiszer","Biztosítás","Banki díj és hitel"];
 const CAT_VERSION=2;
-const APP_VERSION="2.1";
+const APP_VERSION="2.2";
 // KSH éves átlagos infláció (%) – hivatalos; 2025:4,4; 2026 becslés
 const INFLATION_DEFAULT={"2006":3.9,"2007":8.0,"2008":6.1,"2009":4.2,"2010":4.9,"2011":3.9,"2012":5.7,"2013":1.7,"2014":-0.2,"2015":-0.1,"2016":0.4,"2017":2.4,"2018":2.8,"2019":3.4,"2020":3.3,"2021":5.1,"2022":14.5,"2023":17.6,"2024":3.7,"2025":4.4,"2026":4.5};
 // EUR/HUF éves átlag (közelítő, MNB-alapú); 2025/2026 becslés
@@ -495,6 +495,112 @@ function load(){
 function save(){
   try{localStorage.setItem(LS_KEY,JSON.stringify(state));}
   catch(e){toast("Mentés sikertelen – lehet, hogy megtelt a böngésző tárolója.");console.warn(e);}
+  try{scheduleSync();}catch(e){}
+}
+/* ---------------- cloud sync (Supabase + végpont-titkosítás) ---------------- */
+const SYNC_KEY="csaladi_sync_v1";
+let syncCfg=loadSyncCfg();
+let _syncTimer=null,_syncReady=false;
+function loadSyncCfg(){try{return JSON.parse(localStorage.getItem(SYNC_KEY))||{};}catch(e){return {};}}
+function saveSyncCfg(){try{const c=Object.assign({},syncCfg);if(!c.remember)delete c.pass;localStorage.setItem(SYNC_KEY,JSON.stringify(c));}catch(e){}}
+function syncConfigured(){return !!(syncCfg.url&&syncCfg.key);}
+function syncLoggedIn(){return !!(syncCfg.url&&syncCfg.key&&syncCfg.access&&syncCfg.uid);}
+function syncEnabled(){return syncLoggedIn()&&!!syncCfg.pass;}
+function updateSyncStatus(msg,isErr){syncCfg.lastMsg=msg;const e=document.getElementById("syncStatus");if(e){e.textContent=msg;e.style.color=isErr?"var(--neg)":"var(--muted)";}}
+/* base64 */
+function ab2b64(buf){let s="";const b=new Uint8Array(buf);for(let i=0;i<b.length;i++)s+=String.fromCharCode(b[i]);return btoa(s);}
+function b642ab(str){const bin=atob(str);const b=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i);return b;}
+/* crypto (AES-GCM, PBKDF2) */
+async function deriveKey(pass,salt){
+  const km=await crypto.subtle.importKey("raw",new TextEncoder().encode(pass),"PBKDF2",false,["deriveKey"]);
+  return crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:210000,hash:"SHA-256"},km,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
+}
+async function encState(obj,pass){
+  const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+  const key=await deriveKey(pass,salt);
+  const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv},key,new TextEncoder().encode(JSON.stringify(obj)));
+  return JSON.stringify({v:1,salt:ab2b64(salt),iv:ab2b64(iv),ct:ab2b64(ct)});
+}
+async function decState(str,pass){
+  const p=JSON.parse(str);
+  const key=await deriveKey(pass,b642ab(p.salt));
+  const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:b642ab(p.iv)},key,b642ab(p.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+/* supabase REST */
+function sbUrl(path){return syncCfg.url.replace(/\/$/,"")+path;}
+async function sbFetch(path,opts){opts=opts||{};opts.headers=Object.assign({"apikey":syncCfg.key},opts.headers||{});return fetch(sbUrl(path),opts);}
+async function sbAuthPassword(email,pass){
+  const r=await sbFetch("/auth/v1/token?grant_type=password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password:pass})});
+  const j=await r.json();if(!r.ok)throw new Error(j.error_description||j.msg||j.error||("Bejelentkezés hiba "+r.status));return j;
+}
+async function sbSignup(email,pass){
+  const r=await sbFetch("/auth/v1/signup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password:pass})});
+  const j=await r.json();if(!r.ok)throw new Error(j.error_description||j.msg||j.error||("Regisztráció hiba "+r.status));return j;
+}
+async function sbRefresh(){
+  if(!syncCfg.refresh)throw new Error("Lépj be újra");
+  const r=await sbFetch("/auth/v1/token?grant_type=refresh_token",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({refresh_token:syncCfg.refresh})});
+  const j=await r.json();if(!r.ok)throw new Error("Munkamenet lejárt – lépj be újra");
+  syncCfg.access=j.access_token;syncCfg.refresh=j.refresh_token;syncCfg.expiry=Date.now()+(j.expires_in||3600)*1000;saveSyncCfg();return j.access_token;
+}
+async function sbToken(){if(syncCfg.expiry&&Date.now()>syncCfg.expiry-60000)return sbRefresh();return syncCfg.access;}
+async function sbPull(){
+  const tok=await sbToken();
+  const r=await sbFetch("/rest/v1/vault?id=eq."+syncCfg.uid+"&select=data,updated_at",{headers:{"Authorization":"Bearer "+tok}});
+  if(!r.ok)throw new Error("Letöltés hiba ("+r.status+")");
+  const rows=await r.json();return rows[0]||null;
+}
+async function sbPush(encStr){
+  const tok=await sbToken();
+  const r=await sbFetch("/rest/v1/vault",{method:"POST",headers:{"Authorization":"Bearer "+tok,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates,return=minimal"},body:JSON.stringify({id:syncCfg.uid,data:encStr,updated_at:new Date().toISOString()})});
+  if(!r.ok){let m="";try{m=(await r.json()).message||"";}catch(e){}throw new Error("Feltöltés hiba ("+r.status+") "+m);}
+}
+/* high-level */
+function stateHasData(s){return !!((s.transactions&&s.transactions.length)||(s.loans&&s.loans.length)||(s.investments&&s.investments.length)||(s.income&&Object.keys(s.income).length)||(s.properties&&s.properties.length));}
+async function syncPushNow(){
+  if(!syncEnabled())return;
+  try{const enc=await encState(state,syncCfg.pass);await sbPush(enc);syncCfg.lastSync=Date.now();saveSyncCfg();updateSyncStatus("Feltöltve: "+new Date().toLocaleString("hu-HU"));}
+  catch(e){updateSyncStatus("Szinkron hiba: "+e.message,true);console.warn("sync push",e);}
+}
+function scheduleSync(){if(!syncEnabled()||!_syncReady)return;clearTimeout(_syncTimer);_syncTimer=setTimeout(syncPushNow,2500);}
+async function syncPullAndLoad(force){
+  const row=await sbPull();
+  if(!row){_syncReady=true;return {empty:true};}
+  let obj;try{obj=await decState(row.data,syncCfg.pass);}catch(e){throw new Error("Visszafejtés sikertelen – rossz titkosítási jelszó?");}
+  const cloudT=new Date(row.updated_at).getTime();
+  if(!force && stateHasData(state) && syncCfg.lastSync && syncCfg.lastSync>cloudT){_syncReady=true;return {localNewer:true,cloudT};}
+  const fresh=freshState();state=Object.assign(fresh,obj,{owners:Object.assign(fresh.owners,obj.owners||{})});state.catVersion=obj.catVersion;state.subcatsVersion=obj.subcatsVersion;
+  save();syncCfg.lastSync=cloudT;saveSyncCfg();_syncReady=true;return {loaded:true,cloudT};
+}
+async function syncLogin(opts){
+  // opts: {email,pass,passphrase,remember,signup}
+  if(!syncConfigured())throw new Error("Előbb add meg a Supabase URL-t és kulcsot");
+  if(opts.signup){const su=await sbSignup(opts.email,opts.pass);if(!su.access_token){/* e-mail megerősítés kérhet; próbáljunk belépni */}}
+  const auth=await sbAuthPassword(opts.email,opts.pass);
+  if(!auth.access_token)throw new Error("Nincs hozzáférési token (e-mail megerősítés bekapcsolva?)");
+  syncCfg.access=auth.access_token;syncCfg.refresh=auth.refresh_token;syncCfg.expiry=Date.now()+(auth.expires_in||3600)*1000;
+  syncCfg.uid=(auth.user&&auth.user.id)||syncCfg.uid;syncCfg.email=opts.email;syncCfg.remember=opts.remember!==false;syncCfg.pass=opts.passphrase;
+  saveSyncCfg();
+  // első szinkron: ha felhő üres, de helyi van -> feltöltjük; különben felhő tölt
+  const res=await syncPullAndLoad(false);
+  if(res.empty){ if(stateHasData(state)){await syncPushNow();} else {_syncReady=true;} return {seeded:res.empty&&stateHasData(state)}; }
+  return res;
+}
+function syncLogout(){
+  clearTimeout(_syncTimer);_syncReady=false;
+  delete syncCfg.access;delete syncCfg.refresh;delete syncCfg.expiry;delete syncCfg.uid;delete syncCfg.pass;
+  saveSyncCfg();
+}
+async function syncBootstrap(){
+  if(!syncLoggedIn()){return;}
+  if(!syncCfg.pass){updateSyncStatus("Add meg a titkosítási jelszót a szinkronhoz (Beállítások).",true);return;}
+  try{
+    const res=await syncPullAndLoad(false);
+    if(res&&res.loaded){try{ensureSubcats();}catch(e){}go(currentPage);updateSyncStatus("Felhőből frissítve: "+new Date(res.cloudT).toLocaleString("hu-HU"));toast("Adatok szinkronizálva a felhőből");}
+    else if(res&&res.localNewer){_syncReady=true;scheduleSync();updateSyncStatus("Helyi adat újabb – feltöltés folyamatban…");}
+    else {_syncReady=true;updateSyncStatus(syncCfg.lastSync?("Szinkronizálva: "+new Date(syncCfg.lastSync).toLocaleString("hu-HU")):"Bejelentkezve");}
+  }catch(e){updateSyncStatus("Szinkron: "+e.message,true);console.warn("bootstrap",e);}
 }
 function normDesc(d){return String(d||"").toLowerCase().replace(/\s+/g," ").replace(/[0-9]{6,}/g,"").trim().slice(0,60);}
 function applyRules(txn){return categorizeTxn(txn).cat;}
@@ -2322,6 +2428,50 @@ function renderSettings(){
     }},"Kategorizálatlanok automatikus kategorizálása")));
   c.append(reCard);
 
+  // cloud sync panel
+  const syncCard=el("div",{class:"card pad",style:"margin-bottom:16px"});
+  syncCard.append(el("h3",{},"Felhős szinkron (titkosított)"),
+    el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"Több eszközről elérhető, végpont–végpont titkosítva (a Supabase és a fejlesztő sem látja a tartalmat). Csak saját hostingon (pl. GitHub Pages) működik, a claude.ai előnézetben nem."));
+  if(syncLoggedIn()){
+    syncCard.append(el("div",{class:"note",style:"margin:12px 0"},el("span",{class:"em"},"✓"),el("div",{},"Bejelentkezve: "+(syncCfg.email||"")+(syncCfg.pass?"":" — add meg a titkosítási jelszót a letöltéshez"))));
+    if(!syncCfg.pass){
+      const passI=el("input",{type:"password",placeholder:"titkosítási jelszó"});
+      syncCard.append(el("div",{class:"formgrid"},field2("Titkosítási jelszó",passI)),
+        el("button",{class:"btn",onclick:async()=>{syncCfg.pass=passI.value;syncCfg.remember=true;saveSyncCfg();try{await syncBootstrap();renderSettings();}catch(e){toast(e.message);}}},"Visszafejtés / letöltés"));
+    }
+    syncCard.append(el("div",{id:"syncStatus",style:"margin:10px 0;font-size:12.5px;color:var(--muted)"},syncCfg.lastMsg||(syncCfg.lastSync?("Szinkronizálva: "+new Date(syncCfg.lastSync).toLocaleString("hu-HU")):"")));
+    syncCard.append(el("div",{class:"row"},
+      el("button",{class:"btn",onclick:async()=>{updateSyncStatus("Feltöltés…");await syncPushNow();}},"⭱ Feltöltés most"),
+      el("button",{class:"btn ghost",onclick:async()=>{try{updateSyncStatus("Letöltés…");const r=await syncPullAndLoad(true);if(r.loaded){go(currentPage);toast("Letöltve a felhőből");}else toast("Nincs felhős adat");updateSyncStatus(syncCfg.lastSync?("Szinkronizálva: "+new Date(syncCfg.lastSync).toLocaleString("hu-HU")):"");}catch(e){toast(e.message);updateSyncStatus(e.message,true);}}},"⭳ Letöltés most"),
+      el("button",{class:"btn danger",onclick:()=>{if(confirm("Kijelentkezel? A helyi adat megmarad, de a szinkron leáll ezen az eszközön.")){syncLogout();renderSettings();toast("Kijelentkezve");}}},"Kijelentkezés")));
+  } else {
+    const urlI=el("input",{type:"text",value:syncCfg.url||"",placeholder:"https://xxxx.supabase.co"});
+    const keyI=el("input",{type:"text",value:syncCfg.key||"",placeholder:"anon public key"});
+    const emailI=el("input",{type:"email",value:syncCfg.email||"",placeholder:"email"});
+    const pwI=el("input",{type:"password",placeholder:"Supabase jelszó"});
+    const passI=el("input",{type:"password",placeholder:"külön titkosítási jelszó"});
+    const remI=el("input",{type:"checkbox",checked:"checked"});
+    const saveCfg=()=>{syncCfg.url=urlI.value.trim();syncCfg.key=keyI.value.trim();saveSyncCfg();};
+    syncCard.append(
+      el("div",{class:"formgrid",style:"margin-top:12px"},
+        el("div",{class:"field full"},el("label",{},"Supabase projekt URL"),urlI),
+        el("div",{class:"field full"},el("label",{},"Supabase anon kulcs"),keyI),
+        field2("E-mail",emailI),field2("Supabase jelszó",pwI),
+        field2("Titkosítási jelszó (külön titok!)",passI),
+        el("div",{class:"field"},el("label",{},"Megjegyezze az eszközön"),el("div",{style:"padding-top:8px"},remI))),
+      el("div",{id:"syncStatus",style:"margin:10px 0;font-size:12.5px;color:var(--muted)"},syncCfg.lastMsg||""),
+      el("div",{class:"row"},
+        el("button",{class:"btn",onclick:async()=>{saveCfg();if(!emailI.value||!pwI.value){toast("E-mail és jelszó kell");return;}if(!passI.value){toast("Adj meg titkosítási jelszót");return;}try{updateSyncStatus("Bejelentkezés…");await syncLogin({email:emailI.value.trim(),pass:pwI.value,passphrase:passI.value,remember:remI.checked});renderSettings();go(currentPage);toast("Bejelentkezve, szinkron aktív");}catch(e){updateSyncStatus(e.message,true);toast(e.message);}}},"Belépés"),
+        el("button",{class:"btn ghost",onclick:async()=>{saveCfg();if(!emailI.value||!pwI.value){toast("E-mail és jelszó kell");return;}if(!passI.value){toast("Adj meg titkosítási jelszót");return;}try{updateSyncStatus("Regisztráció…");await syncLogin({email:emailI.value.trim(),pass:pwI.value,passphrase:passI.value,remember:remI.checked,signup:true});renderSettings();toast("Fiók kész, szinkron aktív");}catch(e){updateSyncStatus(e.message,true);toast(e.message);}}},"Regisztráció")));
+  }
+  const help=el("details",{style:"margin-top:14px"});
+  help.append(el("summary",{style:"cursor:pointer;font-size:13px;color:var(--accent)"},"Beállítási útmutató (egyszeri, ~15 perc)"));
+  help.append(el("div",{style:"font-size:12.5px;color:var(--muted);margin-top:8px;line-height:1.6;white-space:pre-line"},
+    "1) supabase.com → új projekt (ingyenes).\n2) SQL Editor → futtasd le a lenti kódot (létrehozza a tárolót + jogosultságot).\n3) Authentication → Sign In / Providers → Email engedélyezve; majd Authentication → Settings → „Confirm email” KIKAPCSOL (hogy e-mail-megerősítés nélkül menjen a regisztráció).\n4) Project Settings → Data API / API Keys: másold ide a Project URL-t és az anon (public) kulcsot.\n5) Add meg az e-mailt + egy Supabase jelszót + egy KÜLÖN titkosítási jelszót → Regisztráció. Másik gépen ugyanezekkel: Belépés.\n\nFONTOS: a titkosítási jelszót jegyezd meg jól! Ezzel fejthető vissza az adat, és SEHOL nincs eltárolva a felhőben – ha elveszik, a felhős adat nem állítható vissza."));
+  const sqlTxt="create table if not exists vault (\n  id uuid primary key references auth.users(id) on delete cascade,\n  data text,\n  updated_at timestamptz default now()\n);\nalter table vault enable row level security;\ncreate policy \"own select\" on vault for select using (auth.uid() = id);\ncreate policy \"own insert\" on vault for insert with check (auth.uid() = id);\ncreate policy \"own update\" on vault for update using (auth.uid() = id);";
+  help.append(el("pre",{style:"white-space:pre;background:rgba(127,127,127,.1);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:11px;overflow:auto;margin-top:8px"},sqlTxt));
+  syncCard.append(help);
+  c.append(syncCard);
   // data backup
   const dCard=el("div",{class:"card pad"});
   dCard.append(el("h3",{},"Adatmentés"),el("div",{class:"note warn",style:"margin:12px 0"},el("span",{class:"em"},"⚠"),
@@ -2378,6 +2528,7 @@ function boot(){
   const av=$("#appVer");if(av)av.textContent="verzió "+APP_VERSION;
   renderPage("overview");
   autoFxFetch();
+  try{syncBootstrap();}catch(e){console.warn("syncBootstrap",e);}
   if(migrated)setTimeout(()=>toast("A kategóriák átálltak a UniCredit rendszerre"),400);
 }
 document.addEventListener("DOMContentLoaded",boot);
