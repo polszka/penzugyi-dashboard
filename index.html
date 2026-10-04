@@ -311,7 +311,7 @@ const UNCAT="Nem kategorizált költség";
 const SAVE_CAT="Megtakarítás";
 const FIXED_DEFAULT=["Közműdíj","Élelmiszer","Biztosítás","Banki díj és hitel"];
 const CAT_VERSION=2;
-const APP_VERSION="2.7";
+const APP_VERSION="2.9";
 // KSH éves átlagos infláció (%) – hivatalos; 2025:4,4; 2026 becslés
 const INFLATION_DEFAULT={"2006":3.9,"2007":8.0,"2008":6.1,"2009":4.2,"2010":4.9,"2011":3.9,"2012":5.7,"2013":1.7,"2014":-0.2,"2015":-0.1,"2016":0.4,"2017":2.4,"2018":2.8,"2019":3.4,"2020":3.3,"2021":5.1,"2022":14.5,"2023":17.6,"2024":3.7,"2025":4.4,"2026":4.5};
 // EUR/HUF éves átlag (közelítő, MNB-alapú); 2025/2026 becslés
@@ -2184,15 +2184,47 @@ function openPlanItem(existing){
 let incPerson="household", incMetric="ann", incBrutNet="net", incBaseMode="end", incMetricUserSet=false;
 function incYears(){return Object.keys(state.income||{}).filter(y=>/^\d{4}$/.test(y)).sort();}
 function incPartial(year){const d=(state.income&&state.income[year])||{};if(d.partial===true)return true;if(d.partial===false)return false;return (+year)===new Date().getFullYear();}
-function baseList(d,bn){
-  const f=bn==="gross"?"gross":"net";
-  if(d&&d.baseChanges&&d.baseChanges.length)return d.baseChanges.map(x=>({m:+x.m||1,v:(x[f]==null||x[f]==="")?null:+x[f]})).filter(x=>x.v!=null).sort((a,b)=>a.m-b.m);
-  const legacy=d&&d[bn==="gross"?"baseGross":"baseNet"];
-  return (legacy==null||legacy==="")?[]:[{m:1,v:+legacy}];
+function incNum(v){if(v==null||v==="")return null;if(typeof v==="number")return isNaN(v)?null:v;const n=parseHUNumber(v);return isNaN(n)?null:n;}
+// --- magyar bruttó→nettó becslés (munkaviszony) családi kedvezménnyel ---
+function familyAllowanceBase(children,year){ // havi adóalap-kedvezmény összesen
+  if(!children||children<1)return 0; const y=+year; let per;
+  if(y>=2026) per=children>=3?440000:children===2?266660:133340;
+  else if(y===2025) per=children>=3?330000:children===2?199995:100005; // ~2025 H2 (75%) közelítés
+  else per=children>=3?220000:children===2?133330:66670;               // 2024 és korábbi
+  return per*children;
 }
-function baseYearEnd(d,bn){const l=baseList(d,bn);return l.length?l[l.length-1].v:null;}
-function baseAvg(d,bn){const l=baseList(d,bn);if(!l.length)return null;let tot=0;for(let m=1;m<=12;m++){let v=l[0].v;for(const e of l)if(e.m<=m)v=e.v;tot+=v;}return tot/12;}
-function basePerson(d,bn){return incBaseMode==="avg"?baseAvg(d,bn):baseYearEnd(d,bn);}
+function szjaRateFor(year){return (+year)>=2016?0.15:0.16;}
+function grossToNet(gross,children,year,months){
+  if(gross==null)return null;
+  const rate=szjaRateFor(year),tbRate=0.185;
+  const allow=familyAllowanceBase(children,year)*(months||1);
+  const szja=Math.max(0,gross-allow)*rate;
+  const unused=Math.max(0,allow-gross)*rate; // SZJA-ból megmaradt rész a járulékra megy
+  const tb=Math.max(0,gross*tbRate-unused);
+  return Math.round(gross-szja-tb);
+}
+function childrenOf(d){return (d&&d.children)?(+d.children||0):0;}
+function childrenDefault(person,year){
+  const d=state.income[year]&&state.income[year][person];
+  if(d&&d.children!=null)return d.children;
+  const ys=incYears().filter(yy=>+yy<+year).sort();
+  for(let i=ys.length-1;i>=0;i--){const dd=state.income[ys[i]]&&state.income[ys[i]][person];if(dd&&dd.children!=null)return dd.children;}
+  return "";
+}
+function baseList(d,bn,year){
+  let arr;
+  if(d&&d.baseChanges&&d.baseChanges.length)arr=d.baseChanges.map(x=>({m:+x.m||1,gross:incNum(x.gross),net:incNum(x.net)}));
+  else{const bg=incNum(d&&d.baseGross),bnn=incNum(d&&d.baseNet);if(bg==null&&bnn==null)return [];arr=[{m:1,gross:bg,net:bnn}];}
+  const ch=childrenOf(d);
+  return arr.map(x=>{
+    let v=(bn==="gross")?x.gross:x.net;
+    if(v==null&&bn==="net"&&x.gross!=null)v=grossToNet(x.gross,ch,year,1); // nettó becslés bruttóból
+    return {m:x.m,v:v};
+  }).filter(x=>x.v!=null).sort((a,b)=>a.m-b.m);
+}
+function baseYearEnd(d,bn,year){const l=baseList(d,bn,year);return l.length?l[l.length-1].v:null;}
+function baseAvg(d,bn,year){const l=baseList(d,bn,year);if(!l.length)return null;let tot=0;for(let m=1;m<=12;m++){let v=l[0].v;for(const e of l)if(e.m<=m)v=e.v;tot+=v;}return tot/12;}
+function basePerson(d,bn,year){return incBaseMode==="avg"?baseAvg(d,bn,year):baseYearEnd(d,bn,year);}
 function incVal(year,person,metric,bn){
   const yd=state.income&&state.income[year]; if(!yd)return null;
   if(person==="household"){
@@ -2200,13 +2232,25 @@ function incVal(year,person,metric,bn){
     if(a==null&&b==null)return null; return (a||0)+(b||0);
   }
   const d=yd[person]; if(!d)return null;
-  if(metric==="base")return basePerson(d,bn);
-  const v=d[bn==="gross"?"annGross":"annNet"]; return (v==null||v==="")?null:+v;
+  if(metric==="base")return basePerson(d,bn,year);
+  const stored=incNum(d[bn==="gross"?"annGross":"annNet"]);
+  if(stored!=null)return stored;
+  if(bn==="net"){const g=incNum(d.annGross);if(g!=null)return grossToNet(g,childrenOf(d),year,12);} // éves nettó becslés
+  return null;
+}
+function incNetEstimated(year,person,bn){ // true, ha a nettó becsült (nem beírt)
+  if(bn!=="net")return false;
+  if(person==="household")return ["me","wife"].some(p=>incNetEstimated(year,p,bn));
+  const d=state.income[year]&&state.income[year][person];if(!d)return false;
+  const hasAnnNet=incNum(d.annNet)!=null, hasAnnGross=incNum(d.annGross)!=null;
+  if(incMetric==="ann")return !hasAnnNet&&hasAnnGross;
+  const bl=d.baseChanges&&d.baseChanges.length?d.baseChanges:[{gross:d.baseGross,net:d.baseNet}];
+  return bl.some(x=>incNum(x&&x.net)==null&&incNum(x&&x.gross)!=null);
 }
 function annualBaseVal(year,person,bn){
   if(person==="household"){const a=annualBaseVal(year,"me",bn),b=annualBaseVal(year,"wife",bn);if(a==null&&b==null)return null;return (a||0)+(b||0);}
   const d=state.income[year]&&state.income[year][person];if(!d)return null;
-  const avg=baseAvg(d,bn);return avg==null?null:avg*12;
+  const avg=baseAvg(d,bn,year);return avg==null?null:avg*12;
 }
 function bonusVal(year,person,bn){
   const tot=incVal(year,person,"ann",bn),base=annualBaseVal(year,person,bn);
@@ -2245,6 +2289,7 @@ function renderIncome(){
     el("div",{class:"field"},el("label",{},"Típus"),mk([["net","Nettó"],["gross","Bruttó"]],incBrutNet,v=>incBrutNet=v)));
   if(incMetric==="base")ctrlRow.append(el("div",{class:"field"},el("label",{},"Alapbér"),mk([["end","Év végi"],["avg","Éves átlag"]],incBaseMode,v=>incBaseMode=v)));
   c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},ctrlRow));
+  if(incBrutNet==="net")c.append(el("div",{class:"note",style:"margin-bottom:14px"},el("span",{class:"em"},"≈"),el("div",{},"A nettót ott, ahol nem adtál meg konkrét értéket, a bruttóból becslöm (SZJA 15% + TB 18,5%, családi kedvezménnyel). Pontosításhoz írd be a tényleges nettót, vagy a gyermekszámot az adott évnél.")));
 
   const years=incYears();
   const dataYears=years.filter(y=>incVal(y,incPerson,incMetric,incBrutNet)!=null);
@@ -2339,6 +2384,8 @@ function openIncomeYear(year){
   const pf=(obj,key)=>el("input",{type:"text",value:(obj[key]!=null?obj[key]:""),placeholder:"Ft"});
   const mAG=pf(me,"annGross"),mAN=pf(me,"annNet");
   const wAG=pf(wife,"annGross"),wAN=pf(wife,"annNet");
+  const mCh=el("input",{type:"number",min:"0",max:"12",value:childrenDefault("me",y),placeholder:"0"});
+  const wCh=el("input",{type:"number",min:"0",max:"12",value:childrenDefault("wife",y),placeholder:"0"});
   function baseEditor(personObj){
     const wrap=el("div",{});const rows=[];
     function addRow(m,g,n){
@@ -2364,14 +2411,14 @@ function openIncomeYear(year){
   }
   const meBase=baseEditor(me),wBase=baseEditor(wife);
   const body=el("div",{},
-    el("div",{class:"note"},el("span",{class:"em"},"ℹ"),"Havi alapbér: ha évközben emeltek, add hozzá az új alapbért azzal a hónappal, amelytől érvényes (akár több emelés is egy évben). Éves bevétel = a teljes évi jövedelem (bónusz, túlóra, cafeteria is). A „részleges év” a még nem teljes évekre való (pl. a folyó év) – ezeket a reálbér-görbe kihagyja."),
+    el("div",{class:"note"},el("span",{class:"em"},"ℹ"),"Havi alapbér: ha évközben emeltek, add hozzá az új alapbért azzal a hónappal, amelytől érvényes (akár több emelés is egy évben). Éves bevétel = a teljes évi jövedelem (bónusz, túlóra, cafeteria is). Ha a nettót nem adod meg, a bruttóból becslöm (SZJA 15% + TB 18,5%, családi kedvezménnyel). A „Gyermekek” a családi adókedvezményhez kell – csak annál a személynél add meg, aki érvényesíti (ne duplázd)."),
     el("div",{class:"formgrid",style:"margin-top:12px"},field2("Év",yearI),el("div",{class:"field"},el("label",{},"Részleges év (még nem teljes)"),el("div",{style:"padding-top:8px"},partChk)),field2("Infláció (%)",inflI),field2("EUR/HUF (éves átlag)",fxI)),
     el("div",{class:"section-title"},(state.owners.me||"Én")),
     el("div",{class:"field full"},el("label",{},"Havi alapbér – emelések (hónaptól · bruttó · nettó)"),meBase.cont),
-    el("div",{class:"formgrid"},field2("Éves bevétel – bruttó",mAG),field2("Éves bevétel – nettó",mAN)),
+    el("div",{class:"formgrid"},field2("Éves bevétel – bruttó",mAG),field2("Éves bevétel – nettó",mAN),field2("Gyermekek (családi kedvezmény)",mCh)),
     el("div",{class:"section-title"},(state.owners.wife||"Feleség")),
     el("div",{class:"field full"},el("label",{},"Havi alapbér – emelések (hónaptól · bruttó · nettó)"),wBase.cont),
-    el("div",{class:"formgrid"},field2("Éves bevétel – bruttó",wAG),field2("Éves bevétel – nettó",wAN)));
+    el("div",{class:"formgrid"},field2("Éves bevétel – bruttó",wAG),field2("Éves bevétel – nettó",wAN),field2("Gyermekek (családi kedvezmény)",wCh)));
   showModal(year?(y+" szerkesztése"):"Év felvitele",body,[
     {label:"Mégse",cls:"ghost",onclick:closeModal},
     {label:"Mentés",cls:"",onclick:()=>{
@@ -2379,8 +2426,9 @@ function openIncomeYear(year){
       const num=i=>{const v=parseHUNumber(i.value);return isNaN(v)?undefined:v;};
       const rec=state.income[ny]||{};
       rec.inflation=num(inflI);rec.eurHuf=num(fxI);rec.partial=!!partChk.checked;
-      rec.me=Object.assign(rec.me||{},{annGross:num(mAG),annNet:num(mAN),baseChanges:meBase.collect()});delete rec.me.baseGross;delete rec.me.baseNet;
-      rec.wife=Object.assign(rec.wife||{},{annGross:num(wAG),annNet:num(wAN),baseChanges:wBase.collect()});delete rec.wife.baseGross;delete rec.wife.baseNet;
+      const chNum=i=>i.value===""?undefined:(parseInt(i.value,10)||0);
+      rec.me=Object.assign(rec.me||{},{annGross:num(mAG),annNet:num(mAN),baseChanges:meBase.collect(),children:chNum(mCh)});delete rec.me.baseGross;delete rec.me.baseNet;
+      rec.wife=Object.assign(rec.wife||{},{annGross:num(wAG),annNet:num(wAN),baseChanges:wBase.collect(),children:chNum(wCh)});delete rec.wife.baseGross;delete rec.wife.baseNet;
       state.income[ny]=rec;
       if(year&&String(year)!==ny)delete state.income[year];
       save();closeModal();renderIncome();toast("Mentve");
