@@ -311,7 +311,7 @@ const UNCAT="Nem kategorizált költség";
 const SAVE_CAT="Megtakarítás";
 const FIXED_DEFAULT=["Közműdíj","Élelmiszer","Biztosítás","Banki díj és hitel"];
 const CAT_VERSION=2;
-const APP_VERSION="1.7";
+const APP_VERSION="1.8";
 // Régi (korábbi verzió) kategórianevek -> UniCredit főkategóriák. Egyszeri automatikus átálláshoz.
 const OLD_TO_NEW={
   "Rezsi":"Közműdíj","Lakhatás":"Otthon","Háztartás":"Otthon",
@@ -479,7 +479,7 @@ function freshState(){
 }
 let state=load();
 function load(){
-  try{const raw=localStorage.getItem(LS_KEY);if(raw){const s=JSON.parse(raw);const f=freshState();const merged=Object.assign(f,s,{owners:Object.assign(f.owners,s.owners||{})});merged.catVersion=s.catVersion;return merged;}}
+  try{const raw=localStorage.getItem(LS_KEY);if(raw){const s=JSON.parse(raw);const f=freshState();const merged=Object.assign(f,s,{owners:Object.assign(f.owners,s.owners||{})});merged.catVersion=s.catVersion;merged.subcatsVersion=s.subcatsVersion;return merged;}}
   catch(e){console.warn("load failed",e);}
   return freshState();
 }
@@ -545,7 +545,8 @@ function migrateCategories(){
 }
 function ensureSubcats(){
   if(!state.subcats)state.subcats={};
-  if(state.subcatsVersion===SUBCATS_VERSION)return;
+  const missingKey=Object.keys(UNICREDIT_SUBCATS).some(cat=>!(cat in state.subcats));
+  if(state.subcatsVersion===SUBCATS_VERSION && !missingKey)return;
   Object.keys(UNICREDIT_SUBCATS).forEach(cat=>{
     const cur=(state.subcats[cat]||[]).slice();
     UNICREDIT_SUBCATS[cat].forEach(sc=>{ if(!cur.includes(sc))cur.push(sc); });
