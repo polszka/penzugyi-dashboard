@@ -311,7 +311,7 @@ const UNCAT="Nem kategorizált költség";
 const SAVE_CAT="Megtakarítás";
 const FIXED_DEFAULT=["Közműdíj","Élelmiszer","Biztosítás","Banki díj és hitel"];
 const CAT_VERSION=2;
-const APP_VERSION="1.8";
+const APP_VERSION="1.9";
 // Régi (korábbi verzió) kategórianevek -> UniCredit főkategóriák. Egyszeri automatikus átálláshoz.
 const OLD_TO_NEW={
   "Rezsi":"Közműdíj","Lakhatás":"Otthon","Háztartás":"Otthon",
@@ -434,7 +434,11 @@ const MERCHANT_SUB=[
   ["gépjárműadó",["Adó és bírság","Gépjárműadó"]],["illeték",["Adó és bírság","Illeték"]],["járulék",["Adó és bírság","Járulék"]],["bírság",["Adó és bírság","Bírság"]]
 ];
 function merchantSub(desc){const d=String(desc||"").toLowerCase();for(let i=0;i<MERCHANT_SUB.length;i++){if(d.includes(MERCHANT_SUB[i][0]))return MERCHANT_SUB[i][1];}return null;}
-function subcatsOf(cat){return (state.subcats&&state.subcats[cat])||[];}
+function subcatsOf(cat){
+  const s=state.subcats&&state.subcats[cat];
+  if(s&&s.length)return s;
+  return (UNICREDIT_SUBCATS[cat]||[]).slice();
+}
 function validSub(cat,sub){return (sub&&subcatsOf(cat).includes(sub))?sub:"";}
 // Egy tétel besorolása: {cat, sub}
 function categorizeTxn(txn){
@@ -545,8 +549,11 @@ function migrateCategories(){
 }
 function ensureSubcats(){
   if(!state.subcats)state.subcats={};
-  const missingKey=Object.keys(UNICREDIT_SUBCATS).some(cat=>!(cat in state.subcats));
-  if(state.subcatsVersion===SUBCATS_VERSION && !missingKey)return;
+  const incomplete=Object.keys(UNICREDIT_SUBCATS).some(cat=>{
+    const cur=state.subcats[cat]||[];
+    return UNICREDIT_SUBCATS[cat].some(sc=>!cur.includes(sc));
+  });
+  if(state.subcatsVersion===SUBCATS_VERSION && !incomplete)return;
   Object.keys(UNICREDIT_SUBCATS).forEach(cat=>{
     const cur=(state.subcats[cat]||[]).slice();
     UNICREDIT_SUBCATS[cat].forEach(sc=>{ if(!cur.includes(sc))cur.push(sc); });
