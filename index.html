@@ -311,11 +311,13 @@ const UNCAT="Nem kategorizált költség";
 const SAVE_CAT="Megtakarítás";
 const FIXED_DEFAULT=["Közműdíj","Élelmiszer","Biztosítás","Banki díj és hitel"];
 const CAT_VERSION=2;
-const APP_VERSION="3.2";
+const APP_VERSION="3.3";
 // KSH éves átlagos infláció (%) – hivatalos; 2025:4,4; 2026 becslés
 const INFLATION_DEFAULT={"2006":3.9,"2007":8.0,"2008":6.1,"2009":4.2,"2010":4.9,"2011":3.9,"2012":5.7,"2013":1.7,"2014":-0.2,"2015":-0.1,"2016":0.4,"2017":2.4,"2018":2.8,"2019":3.4,"2020":3.3,"2021":5.1,"2022":14.5,"2023":17.6,"2024":3.7,"2025":4.4,"2026":4.5};
 // EUR/HUF éves átlag (közelítő, MNB-alapú); 2025/2026 becslés
 const EURHUF_DEFAULT={"2006":264.3,"2007":251.3,"2008":251.5,"2009":280.6,"2010":275.5,"2011":279.4,"2012":289.4,"2013":296.9,"2014":308.7,"2015":310.0,"2016":311.5,"2017":309.2,"2018":318.9,"2019":325.3,"2020":351.2,"2021":358.5,"2022":391.3,"2023":381.9,"2024":395.3,"2025":400.0,"2026":375.0};
+// Euróövezeti HICP éves átlagos infláció (%) – Eurostat/ECB; 2025 ~2,1; 2026 becslés
+const EZ_INFLATION_DEFAULT={"2006":2.2,"2007":2.1,"2008":3.3,"2009":0.3,"2010":1.6,"2011":2.7,"2012":2.5,"2013":1.4,"2014":0.4,"2015":0.0,"2016":0.2,"2017":1.5,"2018":1.8,"2019":1.2,"2020":0.3,"2021":2.6,"2022":8.4,"2023":5.4,"2024":2.4,"2025":2.1,"2026":1.9};
 // Régi (korábbi verzió) kategórianevek -> UniCredit főkategóriák. Egyszeri automatikus átálláshoz.
 const OLD_TO_NEW={
   "Rezsi":"Közműdíj","Lakhatás":"Otthon","Háztartás":"Otthon",
@@ -2311,6 +2313,7 @@ function loadIncomeMacro(){
     if(!state.income[y])state.income[y]={};
     if(state.income[y].inflation==null)state.income[y].inflation=INFLATION_DEFAULT[y];
     if(state.income[y].eurHuf==null)state.income[y].eurHuf=EURHUF_DEFAULT[y];
+    if(state.income[y].ezInflation==null)state.income[y].ezInflation=EZ_INFLATION_DEFAULT[y];
   });
   save();
 }
@@ -2318,6 +2321,7 @@ function renderIncome(){
   const c=content();c.innerHTML="";
   if(!state.income)state.income={};
   if(Object.keys(state.income).length===0)loadIncomeMacro();
+  {let ezFill=false;incYears().forEach(y=>{if(state.income[y].ezInflation==null&&EZ_INFLATION_DEFAULT[y]!=null){state.income[y].ezInflation=EZ_INFLATION_DEFAULT[y];ezFill=true;}});if(ezFill)save();}
   if(!incMetricUserSet && !metricHasData(incMetric) && metricHasData(incMetric==="ann"?"base":"ann"))incMetric=(incMetric==="ann"?"base":"ann");
   c.append(el("div",{class:"page-h"},
     el("div",{},el("h1",{},"Bevétel"),el("div",{class:"sub"},"Éves bérek és reálbér-alakulás – infláció és EUR/HUF környezettel")),
@@ -2358,7 +2362,8 @@ function renderIncome(){
   c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},el("h3",{},"Bér összetétele: alapbér vs bónusz/egyéb"),el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"Éves összes bevétel = éves alapbér + bónusz és egyéb (túlóra, cafeteria, 13. havi…). A folyó (részleges) évnél az alapbér ismert, a bónuszt a korábbi évek bónusz/alapbér arányából becslöm (szaggatott, halvány)."),el("div",{class:"chart-box",style:"margin-top:8px"},el("canvas",{id:"incCompChart"}))));
   c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},el("h3",{},"Reálbér-növekedés évről évre"),el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"Nominális növekedés inflációval korrigálva (pozitív = nőtt a vásárlóerő). Az „Éves bevétel” mutatónál a részleges (még nem teljes) éveket kihagyja; a „Havi alapbér” mutató erre nem érzékeny."),el("div",{class:"chart-box",style:"margin-top:8px"},el("canvas",{id:"incRealChart"}))));
   c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},el("h3",{},"Bér EUR-értéke"),el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"A bér az adott évi EUR/HUF-fal átszámolva (a cégek EUR-bázisa miatt)"),el("div",{class:"chart-box",style:"margin-top:8px"},el("canvas",{id:"incEurChart"}))));
-  c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},el("h3",{},"Makró környezet: infláció és EUR/HUF"),el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"KSH infláció és EUR/HUF éves átlag. 2025/2026: becslés – írd felül pontos adattal."),el("div",{class:"chart-box",style:"margin-top:8px"},el("canvas",{id:"incMacroChart"}))));
+  c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},el("h3",{},"Reál EUR-érték (euróövezeti inflációval)"),el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"Az EUR-bér a legutóbbi év euróira deflálva (euróövezeti HICP). A folytonos vonal a reálérték mai euróban, a szaggatott a nominális EUR – a kettő közti rés a pénzromlás."),el("div",{class:"chart-box",style:"margin-top:8px"},el("canvas",{id:"incRealEurChart"}))));
+  c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},el("h3",{},"Makró környezet: infláció és EUR/HUF"),el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"KSH és euróövezeti (HICP) infláció, valamint EUR/HUF éves átlag. 2025/2026: becslés – írd felül pontos adattal."),el("div",{class:"chart-box",style:"margin-top:8px"},el("canvas",{id:"incMacroChart"}))));
 
   const card=el("div",{class:"card"});
   card.append(el("div",{style:"padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"},el("h3",{},"Évek"),el("span",{class:"chip"},years.length+" év")));
@@ -2411,8 +2416,21 @@ function renderIncome(){
     if(chartOrEmpty("incEurChart",eurDs.some(d=>d.data.some(v=>v!=null)),"Nincs adat ehhez a nézethez. Válts mutatót, vagy vigyél fel bér- és EUR/HUF adatot."))
     makeChart("incEurChart",{type:"line",data:{labels:yearsL,datasets:eurDs},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:txtC,font:{size:11}}},tooltip:{callbacks:{label:x=>x.dataset.label+": "+NUM.format(x.raw)+" €"}}},scales:{x:{ticks:{color:txtC,font:{size:10}},grid:{display:false}},y:{ticks:{color:txtC,font:{size:10},callback:v=>NUM.format(v)+" €"},grid:{color:gridC}}}}});
 
+    // Reál EUR-érték: az EUR-bér euróövezeti inflációval a legutóbbi adatos év euróira deflálva
+    const eurYrs=yearsL.filter(y=>incVal(y,incPerson,incMetric,incBrutNet)!=null&&state.income[y].eurHuf);
+    const baseEurYear=eurYrs.length?eurYrs[eurYrs.length-1]:null;
+    const ezCum=y=>{let f=1;if(baseEurYear==null)return 1;for(let k=+y+1;k<=+baseEurYear;k++){const ez=state.income[String(k)]&&state.income[String(k)].ezInflation;f*=(1+((ez==null?0:+ez)/100));}return f;};
+    const realEurSeries=person=>yearsL.map(y=>{const v=incVal(y,person,incMetric,incBrutNet);const fx=state.income[y].eurHuf;if(v==null||!fx)return null;return Math.round((v/fx)*ezCum(y));});
+    const realEurDs=[
+      {label:"Nominál EUR",data:eurSeries(incPerson),borderColor:cssVar("--muted"),backgroundColor:"transparent",borderDash:[4,3],tension:.1,pointRadius:2,borderWidth:1.5,spanGaps:true},
+      {label:"Reál EUR (mai euróban)",data:realEurSeries(incPerson),borderColor:cssVar("--pos"),backgroundColor:"transparent",tension:.1,pointRadius:3,borderWidth:2,spanGaps:true}
+    ];
+    if(chartOrEmpty("incRealEurChart",realEurDs.some(d=>d.data.some(v=>v!=null)),"Ehhez bér- és EUR/HUF-adat kell (az euróövezeti inflációt a makró tölti)."))
+    makeChart("incRealEurChart",{type:"line",data:{labels:yearsL,datasets:realEurDs},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:txtC,font:{size:11}}},tooltip:{callbacks:{label:x=>x.dataset.label+": "+NUM.format(x.raw)+" €"}}},scales:{x:{ticks:{color:txtC,font:{size:10}},grid:{display:false}},y:{ticks:{color:txtC,font:{size:10},callback:v=>NUM.format(v)+" €"},grid:{color:gridC}}}}});
+
     makeChart("incMacroChart",{type:"bar",data:{labels:yearsL,datasets:[
-      {type:"bar",label:"Infláció %",data:yearsL.map(y=>state.income[y].inflation),backgroundColor:cssVar("--warn"),yAxisID:"yInfl"},
+      {type:"bar",label:"Infláció % (KSH)",data:yearsL.map(y=>state.income[y].inflation),backgroundColor:cssVar("--warn"),yAxisID:"yInfl"},
+      {type:"line",label:"Euróövezeti infláció %",data:yearsL.map(y=>state.income[y].ezInflation),borderColor:cssVar("--pos"),backgroundColor:"transparent",tension:.15,pointRadius:2,borderWidth:2,yAxisID:"yInfl"},
       {type:"line",label:"EUR/HUF",data:yearsL.map(y=>state.income[y].eurHuf),borderColor:cssVar("--accent"),backgroundColor:"transparent",tension:.15,pointRadius:2,borderWidth:2,yAxisID:"yFx"}
     ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:"index",intersect:false},plugins:{legend:{labels:{color:txtC,font:{size:11}}}},scales:{x:{ticks:{color:txtC,font:{size:10}},grid:{display:false}},yInfl:{position:"left",title:{display:true,text:"Infláció %",color:txtC},ticks:{color:txtC,font:{size:10}},grid:{color:gridC}},yFx:{position:"right",title:{display:true,text:"EUR/HUF",color:txtC},ticks:{color:txtC,font:{size:10}},grid:{drawOnChartArea:false}}}}});
   },0);
@@ -2424,6 +2442,7 @@ function openIncomeYear(year){
   const yearI=el("input",{type:"number",value:y,min:"1990",max:"2100"});
   const inflI=el("input",{type:"text",value:(yd.inflation!=null?yd.inflation:(INFLATION_DEFAULT[y]!=null?INFLATION_DEFAULT[y]:"")),placeholder:"%"});
   const fxI=el("input",{type:"text",value:(yd.eurHuf!=null?yd.eurHuf:(EURHUF_DEFAULT[y]!=null?EURHUF_DEFAULT[y]:"")),placeholder:"EUR/HUF"});
+  const ezI=el("input",{type:"text",value:(yd.ezInflation!=null?yd.ezInflation:(EZ_INFLATION_DEFAULT[y]!=null?EZ_INFLATION_DEFAULT[y]:"")),placeholder:"%"});
   const partialInit=(yd.partial!=null)?yd.partial:((+y)===new Date().getFullYear());
   const partChk=el("input",{type:"checkbox"});if(partialInit)partChk.checked=true;
   const pf=(obj,key)=>el("input",{type:"text",value:(obj[key]!=null?obj[key]:""),placeholder:"Ft"});
@@ -2462,7 +2481,7 @@ function openIncomeYear(year){
   const meBase=baseEditor(me),wBase=baseEditor(wife);
   const body=el("div",{},
     el("div",{class:"note"},el("span",{class:"em"},"ℹ"),"Havi alapbér: ha évközben emeltek, add hozzá az új alapbért azzal a hónappal, amelytől érvényes. Éves bevétel = teljes évi jövedelem (bónusz, túlóra, cafeteria is). Ha a nettót nem adod meg, a bruttóból becslöm (SZJA 15% + TB 18,5%, családi kedvezménnyel). „Gyermekek”: csak annál, aki a kedvezményt érvényesíti. Bónusz: a cél % a pre-áprilisi (márciusi) alapbér éves összegéből (gazdasági év márc. 30-ig, emelés áprilisban), a tényleges a teljesítés függvénye (0–150%); ha nincs beírt éves bevétel, ebből becslöm a bónuszt."),
-    el("div",{class:"formgrid",style:"margin-top:12px"},field2("Év",yearI),el("div",{class:"field"},el("label",{},"Részleges év (még nem teljes)"),el("div",{style:"padding-top:8px"},partChk)),field2("Infláció (%)",inflI),field2("EUR/HUF (éves átlag)",fxI)),
+    el("div",{class:"formgrid",style:"margin-top:12px"},field2("Év",yearI),el("div",{class:"field"},el("label",{},"Részleges év (még nem teljes)"),el("div",{style:"padding-top:8px"},partChk)),field2("Infláció – KSH (%)",inflI),field2("EUR/HUF (éves átlag)",fxI),field2("Euróövezeti infláció (%)",ezI)),
     el("div",{class:"section-title"},(state.owners.me||"Én")),
     el("div",{class:"field full"},el("label",{},"Havi alapbér – emelések (hónaptól · bruttó · nettó)"),meBase.cont),
     el("div",{class:"formgrid"},field2("Éves bevétel – bruttó",mAG),field2("Éves bevétel – nettó",mAN),field2("Gyermekek (családi kedvezmény)",mCh),field2("Bónusz cél (% alapbérből)",mBp),field2("Várható bónusz-teljesítés (%)",mBa)),
@@ -2475,7 +2494,7 @@ function openIncomeYear(year){
       const ny=String(parseInt(yearI.value,10)||y);
       const num=i=>{const v=parseHUNumber(i.value);return isNaN(v)?undefined:v;};
       const rec=state.income[ny]||{};
-      rec.inflation=num(inflI);rec.eurHuf=num(fxI);rec.partial=!!partChk.checked;
+      rec.inflation=num(inflI);rec.eurHuf=num(fxI);rec.ezInflation=num(ezI);rec.partial=!!partChk.checked;
       const chNum=i=>i.value===""?undefined:(parseInt(i.value,10)||0);
       rec.me=Object.assign(rec.me||{},{annGross:num(mAG),annNet:num(mAN),baseChanges:meBase.collect(),children:chNum(mCh),bonusPct:num(mBp),bonusAch:num(mBa)});delete rec.me.baseGross;delete rec.me.baseNet;
       rec.wife=Object.assign(rec.wife||{},{annGross:num(wAG),annNet:num(wAN),baseChanges:wBase.collect(),children:chNum(wCh),bonusPct:num(wBp),bonusAch:num(wBa)});delete rec.wife.baseGross;delete rec.wife.baseNet;
