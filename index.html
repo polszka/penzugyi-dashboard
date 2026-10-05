@@ -311,7 +311,7 @@ const UNCAT="Nem kategorizált költség";
 const SAVE_CAT="Megtakarítás";
 const FIXED_DEFAULT=["Közműdíj","Élelmiszer","Biztosítás","Banki díj és hitel"];
 const CAT_VERSION=2;
-const APP_VERSION="3.8";
+const APP_VERSION="3.9";
 // KSH éves átlagos infláció (%) – hivatalos; 2025:4,4; 2026 becslés
 const INFLATION_DEFAULT={"2006":3.9,"2007":8.0,"2008":6.1,"2009":4.2,"2010":4.9,"2011":3.9,"2012":5.7,"2013":1.7,"2014":-0.2,"2015":-0.1,"2016":0.4,"2017":2.4,"2018":2.8,"2019":3.4,"2020":3.3,"2021":5.1,"2022":14.5,"2023":17.6,"2024":3.7,"2025":4.4,"2026":4.5};
 // EUR/HUF éves átlag (közelítő, MNB-alapú); 2025/2026 becslés
@@ -2242,6 +2242,7 @@ function incVal(year,person,metric,bn){
   const stored=incNum(d[bn==="gross"?"annGross":"annNet"]);
   if(stored!=null)return stored;
   if(bn==="net"){const g=incNum(d.annGross);if(g!=null)return grossToNet(g,childrenOf(d),year,12);} // éves nettó becslés
+  const ba=baseAvg(d,bn,year); if(ba!=null)return ba*12; // nincs éves összesítő -> évesített alapbér (konzisztens az alapbérrel)
   return null;
 }
 function incNetEstimated(year,person,bn){ // true, ha a nettó becsült (nem beírt)
