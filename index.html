@@ -311,7 +311,7 @@ const UNCAT="Nem kategorizált költség";
 const SAVE_CAT="Megtakarítás";
 const FIXED_DEFAULT=["Közműdíj","Élelmiszer","Biztosítás","Banki díj és hitel"];
 const CAT_VERSION=2;
-const APP_VERSION="2.9";
+const APP_VERSION="3.2";
 // KSH éves átlagos infláció (%) – hivatalos; 2025:4,4; 2026 becslés
 const INFLATION_DEFAULT={"2006":3.9,"2007":8.0,"2008":6.1,"2009":4.2,"2010":4.9,"2011":3.9,"2012":5.7,"2013":1.7,"2014":-0.2,"2015":-0.1,"2016":0.4,"2017":2.4,"2018":2.8,"2019":3.4,"2020":3.3,"2021":5.1,"2022":14.5,"2023":17.6,"2024":3.7,"2025":4.4,"2026":4.5};
 // EUR/HUF éves átlag (közelítő, MNB-alapú); 2025/2026 becslés
@@ -2065,13 +2065,17 @@ function renderPlan(){
   const totalMonthlyNeed=Math.round(activePlans.reduce((a,p)=>a+planMonthlyNeed(p).monthly,0));
   const investable=monthlyLeftover-totalMonthlyNeed;
 
+  let estAnnBonus=null,estAnnBonusMax=null; try{ estAnnBonus=estBonus(yr,"household","net"); estAnnBonusMax=estBonusMax(yr,"household","net"); }catch(e){}
   const tiles=el("div",{class:"grid tiles",style:"margin-bottom:14px"});
   tiles.append(
     tile("Havi maradvány",money(monthlyLeftover),monthlyLeftover>=0?"pos":"neg","bevétel − kiadás"),
     tile("Tervezett megtakarítás / hó",money(totalMonthlyNeed),"warn",activePlans.length+" aktív cél"),
     tile("Szabadon befektethető / hó",money(investable),(investable>=0?"pos":"neg"),investable>=0?"ennyi mehet havonta hosszú távra":"⚠ nem fér bele a havi keretbe"),
     tile("Tervezett kiadások ("+yr+")",money(totalPlanned),"neg",plans.length+" tétel"));
+  if(estAnnBonus!=null&&estAnnBonus>0)tiles.append(tile("Becsült éves bónusz (nettó)",money(Math.round(estAnnBonus)),"accent","korábbi évek alapján – extra megtakarítási potenciál"));
   c.append(tiles);
+  if(estAnnBonus!=null&&estAnnBonus>0)c.append(el("div",{class:"note",style:"margin-bottom:14px"},el("span",{class:"em"},"≈"),
+    el("div",{},`A ${yr}. évre várható nettó bónusz kb. ${money(Math.round(estAnnBonus))}`+(estAnnBonusMax!=null&&estAnnBonusMax>estAnnBonus?` (tartomány: 0 – ${money(Math.round(estAnnBonusMax))}, a célteljesítés 0–150%-a szerint)`:``)+`. Ez a havi maradványon felüli, egyszeri megtakarítási/befektetési potenciál – a tényleges összeg a Bevétel fülön pontosítható.`)));
 
   if(investable<0){
     c.append(el("div",{class:"note warn",style:"margin-bottom:14px"},el("span",{class:"em"},"⚠"),
@@ -2256,6 +2260,45 @@ function bonusVal(year,person,bn){
   const tot=incVal(year,person,"ann",bn),base=annualBaseVal(year,person,bn);
   if(tot==null||base==null)return null;return tot-base;
 }
+function bonusRatio(person,bn){ // átlagos bónusz/alapbér arány a teljes (nem részleges) évekből
+  let num=0,den=0;
+  incYears().forEach(y=>{if(incPartial(y))return;const base=annualBaseVal(y,person,bn),bonus=bonusVal(y,person,bn);if(base!=null&&bonus!=null&&base>0){num+=bonus;den+=base;}});
+  return den>0?num/den:null;
+}
+function incFieldCarry(person,year,field){ // adott évi érték, vagy a legutóbbi korábbi évé (továbbvitel)
+  const d=state.income[year]&&state.income[year][person];
+  if(d&&d[field]!=null&&d[field]!=="")return +d[field];
+  const prior=incYears().filter(yy=>+yy<+year).sort();
+  for(let i=prior.length-1;i>=0;i--){const dd=state.income[prior[i]]&&state.income[prior[i]][person];if(dd&&dd[field]!=null&&dd[field]!=="")return +dd[field];}
+  return null;
+}
+function grossBonusToNet(g,year){return g==null?null:Math.round(g*(1-szjaRateFor(year)-0.185));} // bónusz nettó (kedvezmény már az alapbéren)
+function baseAtMonth(d,bn,year,month){const l=baseList(d,bn,year);if(!l.length)return null;let v=l[0].v;for(const e of l)if(e.m<=month)v=e.v;return v;}
+function bonusBaseGross(year,person){ // a bónusz alapja: a pre-áprilisi (márciusi) havi alapbér évesítve
+  const d=state.income[year]&&state.income[year][person];if(!d)return null;
+  const m3=baseAtMonth(d,"gross",year,3);return m3==null?null:m3*12;
+}
+function estBonusGross(year,person,factor){ // factor: 1=várható teljesítés, vagy adott szorzó (pl. 1.5=max)
+  if(person==="household"){const a=estBonusGross(year,"me",factor),b=estBonusGross(year,"wife",factor);if(a==null&&b==null)return null;return (a||0)+(b||0);}
+  const baseG=bonusBaseGross(year,person);if(baseG==null)return null;
+  const pct=incFieldCarry(person,year,"bonusPct");if(pct==null)return null;
+  let mult; if(factor!=null)mult=factor; else {let ach=incFieldCarry(person,year,"bonusAch");if(ach==null)ach=100;mult=ach/100;}
+  return baseG*(pct/100)*mult;
+}
+function estBonusHistorical(year,person,bn){
+  const base=annualBaseVal(year,person,bn);if(base==null)return null;
+  const r=bonusRatio(person,bn);if(r==null)return null;return base*r;
+}
+function estBonus(year,person,bn){ // becsült éves bónusz: konfigurált cél%×teljesítés, különben történeti arány
+  const g=estBonusGross(year,person);
+  if(g==null)return estBonusHistorical(year,person,bn);
+  return bn==="gross"?g:grossBonusToNet(g,year);
+}
+function estBonusMax(year,person,bn){ // max (cél 150%-a)
+  const g=estBonusGross(year,person,1.5);
+  if(g==null)return null;
+  return bn==="gross"?g:grossBonusToNet(g,year);
+}
 function metricHasData(metric){return incYears().some(y=>["me","wife"].some(p=>incVal(y,p,metric,"net")!=null||incVal(y,p,metric,"gross")!=null));}
 function chartOrEmpty(canvasId,hasData,msg){
   if(hasData)return true;
@@ -2312,7 +2355,7 @@ function renderIncome(){
     tile("EUR-érték ("+(lastY||"–")+")",eurLast?(NUM.format(Math.round(eurLast))+" €"):"–","accent",lastY&&state.income[lastY].eurHuf?("árfolyam "+NUM2.format(state.income[lastY].eurHuf)):"")));
 
   c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},el("h3",{},"Bevétel alakulása (nominál)"),el("div",{class:"chart-box",style:"margin-top:8px"},el("canvas",{id:"incNomChart"}))));
-  c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},el("h3",{},"Bér összetétele: alapbér vs bónusz/egyéb"),el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"Éves összes bevétel = éves alapbér + bónusz és egyéb (túlóra, cafeteria, 13. havi…). Csak teljes évekre, ahol van éves összesítő is."),el("div",{class:"chart-box",style:"margin-top:8px"},el("canvas",{id:"incCompChart"}))));
+  c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},el("h3",{},"Bér összetétele: alapbér vs bónusz/egyéb"),el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"Éves összes bevétel = éves alapbér + bónusz és egyéb (túlóra, cafeteria, 13. havi…). A folyó (részleges) évnél az alapbér ismert, a bónuszt a korábbi évek bónusz/alapbér arányából becslöm (szaggatott, halvány)."),el("div",{class:"chart-box",style:"margin-top:8px"},el("canvas",{id:"incCompChart"}))));
   c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},el("h3",{},"Reálbér-növekedés évről évre"),el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"Nominális növekedés inflációval korrigálva (pozitív = nőtt a vásárlóerő). Az „Éves bevétel” mutatónál a részleges (még nem teljes) éveket kihagyja; a „Havi alapbér” mutató erre nem érzékeny."),el("div",{class:"chart-box",style:"margin-top:8px"},el("canvas",{id:"incRealChart"}))));
   c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},el("h3",{},"Bér EUR-értéke"),el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"A bér az adott évi EUR/HUF-fal átszámolva (a cégek EUR-bázisa miatt)"),el("div",{class:"chart-box",style:"margin-top:8px"},el("canvas",{id:"incEurChart"}))));
   c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},el("h3",{},"Makró környezet: infláció és EUR/HUF"),el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"KSH infláció és EUR/HUF éves átlag. 2025/2026: becslés – írd felül pontos adattal."),el("div",{class:"chart-box",style:"margin-top:8px"},el("canvas",{id:"incMacroChart"}))));
@@ -2344,13 +2387,15 @@ function renderIncome(){
     if(chartOrEmpty("incNomChart",nomDs.some(d=>d.data.some(v=>v!=null)),nomMsg))
     makeChart("incNomChart",{type:"bar",data:{labels:yearsL,datasets:nomDs},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:txtC,font:{size:11}}},tooltip:{callbacks:{label:x=>x.dataset.label+": "+money(x.raw)}}},scales:{x:{stacked:stacked,ticks:{color:txtC,font:{size:10}},grid:{display:false}},y:{stacked:stacked,ticks:{color:txtC,font:{size:10},callback:v=>NUM.format(v)},grid:{color:gridC}}}}});
 
-    const compBase=yearsL.map(y=>incPartial(y)?null:annualBaseVal(y,incPerson,incBrutNet));
+    const compBase=yearsL.map(y=>annualBaseVal(y,incPerson,incBrutNet));
     const compBonus=yearsL.map(y=>incPartial(y)?null:bonusVal(y,incPerson,incBrutNet));
-    if(chartOrEmpty("incCompChart",compBase.some(v=>v!=null)||compBonus.some(v=>v!=null),"Az összetételhez a havi alapbér mellett az „Éves bevétel” összesítő is kell (teljes évekre). Vidd fel az éves bruttó/nettó mezőket."))
+    const compEst=yearsL.map(y=>incPartial(y)?estBonus(y,incPerson,incBrutNet):null);
+    if(chartOrEmpty("incCompChart",compBase.some(v=>v!=null)||compBonus.some(v=>v!=null)||compEst.some(v=>v!=null),"Az összetételhez havi alapbér kell; a bónuszhoz éves összesítő (teljes évekre), a folyó évhez pedig legalább egy korábbi teljes év a becsléshez."))
     makeChart("incCompChart",{type:"bar",data:{labels:yearsL,datasets:[
       {label:"Alapbér (éves)",data:compBase,backgroundColor:cssVar("--accent")},
-      {label:"Bónusz és egyéb",data:compBonus,backgroundColor:cssVar("--warn")}
-    ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:txtC,font:{size:11}}},tooltip:{callbacks:{label:x=>x.dataset.label+": "+money(x.raw)}}},scales:{x:{stacked:true,ticks:{color:txtC,font:{size:10}},grid:{display:false}},y:{stacked:true,ticks:{color:txtC,font:{size:10},callback:v=>NUM.format(v)},grid:{color:gridC}}}}});
+      {label:"Bónusz és egyéb",data:compBonus,backgroundColor:cssVar("--warn")},
+      {label:"Bónusz (becsült)",data:compEst,backgroundColor:"rgba(217,164,65,.35)",borderColor:cssVar("--warn"),borderWidth:1.5,borderDash:[4,3]}
+    ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:txtC,font:{size:11}}},tooltip:{callbacks:{label:x=>x.dataset.label+": "+money(x.raw)+(x.dataset.label==="Bónusz (becsült)"?" (becslés)":"")}}},scales:{x:{stacked:true,ticks:{color:txtC,font:{size:10}},grid:{display:false}},y:{stacked:true,ticks:{color:txtC,font:{size:10},callback:v=>NUM.format(v)},grid:{color:gridC}}}}});
 
     function realSeries(person){return yearsL.map((y,i)=>{if(i===0)return null;const py=yearsL[i-1];if(incMetric==="ann"&&(incPartial(y)||incPartial(py)))return null;const a=incVal(py,person,incMetric,incBrutNet),b=incVal(y,person,incMetric,incBrutNet);if(a==null||b==null||a===0)return null;const g=b/a-1;const infl=(state.income[y].inflation||0)/100;return +(((1+g)/(1+infl)-1)*100).toFixed(1);});}
     const realDs=[];
@@ -2386,6 +2431,11 @@ function openIncomeYear(year){
   const wAG=pf(wife,"annGross"),wAN=pf(wife,"annNet");
   const mCh=el("input",{type:"number",min:"0",max:"12",value:childrenDefault("me",y),placeholder:"0"});
   const wCh=el("input",{type:"number",min:"0",max:"12",value:childrenDefault("wife",y),placeholder:"0"});
+  const carryV=(p,f)=>{const v=incFieldCarry(p,y,f);return v==null?"":v;};
+  const mBp=el("input",{type:"text",value:carryV("me","bonusPct"),placeholder:"pl. 15"});
+  const mBa=el("input",{type:"text",value:carryV("me","bonusAch"),placeholder:"100 (0–150)"});
+  const wBp=el("input",{type:"text",value:carryV("wife","bonusPct"),placeholder:"pl. 15"});
+  const wBa=el("input",{type:"text",value:carryV("wife","bonusAch"),placeholder:"100 (0–150)"});
   function baseEditor(personObj){
     const wrap=el("div",{});const rows=[];
     function addRow(m,g,n){
@@ -2411,14 +2461,14 @@ function openIncomeYear(year){
   }
   const meBase=baseEditor(me),wBase=baseEditor(wife);
   const body=el("div",{},
-    el("div",{class:"note"},el("span",{class:"em"},"ℹ"),"Havi alapbér: ha évközben emeltek, add hozzá az új alapbért azzal a hónappal, amelytől érvényes (akár több emelés is egy évben). Éves bevétel = a teljes évi jövedelem (bónusz, túlóra, cafeteria is). Ha a nettót nem adod meg, a bruttóból becslöm (SZJA 15% + TB 18,5%, családi kedvezménnyel). A „Gyermekek” a családi adókedvezményhez kell – csak annál a személynél add meg, aki érvényesíti (ne duplázd)."),
+    el("div",{class:"note"},el("span",{class:"em"},"ℹ"),"Havi alapbér: ha évközben emeltek, add hozzá az új alapbért azzal a hónappal, amelytől érvényes. Éves bevétel = teljes évi jövedelem (bónusz, túlóra, cafeteria is). Ha a nettót nem adod meg, a bruttóból becslöm (SZJA 15% + TB 18,5%, családi kedvezménnyel). „Gyermekek”: csak annál, aki a kedvezményt érvényesíti. Bónusz: a cél % a pre-áprilisi (márciusi) alapbér éves összegéből (gazdasági év márc. 30-ig, emelés áprilisban), a tényleges a teljesítés függvénye (0–150%); ha nincs beírt éves bevétel, ebből becslöm a bónuszt."),
     el("div",{class:"formgrid",style:"margin-top:12px"},field2("Év",yearI),el("div",{class:"field"},el("label",{},"Részleges év (még nem teljes)"),el("div",{style:"padding-top:8px"},partChk)),field2("Infláció (%)",inflI),field2("EUR/HUF (éves átlag)",fxI)),
     el("div",{class:"section-title"},(state.owners.me||"Én")),
     el("div",{class:"field full"},el("label",{},"Havi alapbér – emelések (hónaptól · bruttó · nettó)"),meBase.cont),
-    el("div",{class:"formgrid"},field2("Éves bevétel – bruttó",mAG),field2("Éves bevétel – nettó",mAN),field2("Gyermekek (családi kedvezmény)",mCh)),
+    el("div",{class:"formgrid"},field2("Éves bevétel – bruttó",mAG),field2("Éves bevétel – nettó",mAN),field2("Gyermekek (családi kedvezmény)",mCh),field2("Bónusz cél (% alapbérből)",mBp),field2("Várható bónusz-teljesítés (%)",mBa)),
     el("div",{class:"section-title"},(state.owners.wife||"Feleség")),
     el("div",{class:"field full"},el("label",{},"Havi alapbér – emelések (hónaptól · bruttó · nettó)"),wBase.cont),
-    el("div",{class:"formgrid"},field2("Éves bevétel – bruttó",wAG),field2("Éves bevétel – nettó",wAN),field2("Gyermekek (családi kedvezmény)",wCh)));
+    el("div",{class:"formgrid"},field2("Éves bevétel – bruttó",wAG),field2("Éves bevétel – nettó",wAN),field2("Gyermekek (családi kedvezmény)",wCh),field2("Bónusz cél (% alapbérből)",wBp),field2("Várható bónusz-teljesítés (%)",wBa)));
   showModal(year?(y+" szerkesztése"):"Év felvitele",body,[
     {label:"Mégse",cls:"ghost",onclick:closeModal},
     {label:"Mentés",cls:"",onclick:()=>{
@@ -2427,8 +2477,8 @@ function openIncomeYear(year){
       const rec=state.income[ny]||{};
       rec.inflation=num(inflI);rec.eurHuf=num(fxI);rec.partial=!!partChk.checked;
       const chNum=i=>i.value===""?undefined:(parseInt(i.value,10)||0);
-      rec.me=Object.assign(rec.me||{},{annGross:num(mAG),annNet:num(mAN),baseChanges:meBase.collect(),children:chNum(mCh)});delete rec.me.baseGross;delete rec.me.baseNet;
-      rec.wife=Object.assign(rec.wife||{},{annGross:num(wAG),annNet:num(wAN),baseChanges:wBase.collect(),children:chNum(wCh)});delete rec.wife.baseGross;delete rec.wife.baseNet;
+      rec.me=Object.assign(rec.me||{},{annGross:num(mAG),annNet:num(mAN),baseChanges:meBase.collect(),children:chNum(mCh),bonusPct:num(mBp),bonusAch:num(mBa)});delete rec.me.baseGross;delete rec.me.baseNet;
+      rec.wife=Object.assign(rec.wife||{},{annGross:num(wAG),annNet:num(wAN),baseChanges:wBase.collect(),children:chNum(wCh),bonusPct:num(wBp),bonusAch:num(wBa)});delete rec.wife.baseGross;delete rec.wife.baseNet;
       state.income[ny]=rec;
       if(year&&String(year)!==ny)delete state.income[year];
       save();closeModal();renderIncome();toast("Mentve");
