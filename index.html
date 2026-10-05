@@ -311,7 +311,7 @@ const UNCAT="Nem kategorizált költség";
 const SAVE_CAT="Megtakarítás";
 const FIXED_DEFAULT=["Közműdíj","Élelmiszer","Biztosítás","Banki díj és hitel"];
 const CAT_VERSION=2;
-const APP_VERSION="3.5";
+const APP_VERSION="3.8";
 // KSH éves átlagos infláció (%) – hivatalos; 2025:4,4; 2026 becslés
 const INFLATION_DEFAULT={"2006":3.9,"2007":8.0,"2008":6.1,"2009":4.2,"2010":4.9,"2011":3.9,"2012":5.7,"2013":1.7,"2014":-0.2,"2015":-0.1,"2016":0.4,"2017":2.4,"2018":2.8,"2019":3.4,"2020":3.3,"2021":5.1,"2022":14.5,"2023":17.6,"2024":3.7,"2025":4.4,"2026":4.5};
 // EUR/HUF éves átlag (közelítő, MNB-alapú); 2025/2026 becslés
@@ -2262,6 +2262,11 @@ function bonusVal(year,person,bn){
   const tot=incVal(year,person,"ann",bn),base=annualBaseVal(year,person,bn);
   if(tot==null||base==null)return null;return tot-base;
 }
+function dispNet(person,year){ // éves nettó (elkölthető) jövedelem – éves összeg, különben évesített alapbér-nettó
+  let a=incVal(year,person,"ann","net");
+  if(a==null)a=annualBaseVal(year,person,"net");
+  return (a!=null&&a>0)?a:null;
+}
 function bonusRatio(person,bn){ // átlagos bónusz/alapbér arány a teljes (nem részleges) évekből
   let num=0,den=0;
   incYears().forEach(y=>{if(incPartial(y))return;const base=annualBaseVal(y,person,bn),bonus=bonusVal(y,person,bn);if(base!=null&&bonus!=null&&base>0){num+=bonus;den+=base;}});
@@ -2357,6 +2362,45 @@ function renderIncome(){
     tile("Reálbér-változás ("+(prevY||"–")+"→"+(lastY||"–")+")",realLast==null?"–":((realLast>=0?"+":"")+NUM2.format(realLast*100)+"%"),(realLast==null?"":(realLast>=0?"pos":"neg")),"inflációval korrigálva"),
     tile("Bónusz és egyéb ("+(bY||"–")+")",bAmt==null?"–":money(Math.round(bAmt)),"warn",bPct!=null?(bPct+"% a teljes bevételből"):"éves − alapbér×12"),
     tile("EUR-érték ("+(lastY||"–")+")",eurLast?(NUM.format(Math.round(eurLast))+" €"):"–","accent",lastY&&state.income[lastY].eurHuf?("árfolyam "+NUM2.format(state.income[lastY].eurHuf)):"")));
+  (function(){
+    const fy=incYears().filter(y=>!incPartial(y)&&dispNet(incPerson,y)!=null);
+    if(fy.length<2)return;
+    const base=fy[0],last=fy[fy.length-1],span=+last-+base;
+    const huCum=y=>{let f=1;for(let k=+base+1;k<=+y;k++){const inf=state.income[String(k)]&&state.income[String(k)].inflation;f*=(1+((inf==null?0:+inf)/100));}return f;};
+    const ezCum=y=>{let f=1;for(let k=+base+1;k<=+y;k++){const inf=state.income[String(k)]&&state.income[String(k)].ezInflation;f*=(1+((inf==null?0:+inf)/100));}return f;};
+    const idxHuf=y=>100*(dispNet(incPerson,y)/huCum(y))/dispNet(incPerson,base);
+    const eurNet=y=>{const fx=state.income[y]&&state.income[y].eurHuf;const n=dispNet(incPerson,y);return (n!=null&&fx)?n/fx:null;};
+    const idxEur=y=>{const a=eurNet(y),b=eurNet(base);return (a!=null&&b)?100*(a/ezCum(y))/b:null;};
+    const total=idxHuf(last)-100,ann=span>0?((Math.pow(idxHuf(last)/100,1/span)-1)*100):0;
+    const eLast=idxEur(last),annEur=(eLast!=null&&span>0)?((Math.pow(eLast/100,1/span)-1)*100):null;
+    let verdict,vcls;
+    if(ann<-0.5){verdict="reálértékben csökken";vcls="neg";}
+    else if(ann<=0.5){verdict="gyakorlatilag egyhelyben toporog";vcls="warn";}
+    else if(ann<=1.5){verdict="lassan, de nő";vcls="pos";}
+    else{verdict="érdemben nő";vcls="pos";}
+    const whoLbl=incPerson==="household"?"Háztartási":((incPerson==="me"?state.owners.me:state.owners.wife)+" –");
+    const card=el("div",{class:"card pad",style:"margin-bottom:14px"});
+    card.append(el("h3",{},"Elkölthető jövedelem reálértékben – nő vagy egyhelyben?"),
+      el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},whoLbl+" nettó éves jövedelem, inflációval korrigálva. Bázis: "+base+" = 100. Kék = forint (KSH), zöld = EUR (euróövezet). A „Kire” szűrő hat rá."),
+      el("div",{class:"grid tiles",style:"margin-top:10px"},
+        tile("Évi átlagos reálváltozás (HUF)",(ann>=0?"+":"")+NUM2.format(ann)+"%",vcls,base+"→"+last),
+        tile("Összes reálváltozás (HUF)",(total>=0?"+":"")+NUM2.format(total)+"%",(total>=0?"pos":"neg"),base+" óta"),
+        tile("Évi átlag EUR-alapon",annEur==null?"–":((annEur>=0?"+":"")+NUM2.format(annEur)+"%"),(annEur==null?"":(annEur>=0?"pos":"neg")),"euróövezeti inflációval")),
+      el("div",{class:"note"+(vcls==="warn"||vcls==="neg"?" warn":""),style:"margin-top:10px"},el("span",{class:"em"},vcls==="neg"?"↓":vcls==="warn"?"≈":"↑"),
+        el("div",{},"A reál elkölthető jövedelem "+base+" óta forintban "+(total>=0?"+":"")+NUM2.format(total)+"%-kal változott (évi átlag "+(ann>=0?"+":"")+NUM2.format(ann)+"%) – "+verdict+"."+(annEur!=null?(" EUR-alapon évi átlag "+(annEur>=0?"+":"")+NUM2.format(annEur)+"%."):"")+" "+(ann<=0.5?"A nominális béremeléseket az infláció nagyrészt elvitte.":"A béremelés az inflációnál gyorsabban nőtt."))),
+      el("div",{class:"chart-box",style:"margin-top:10px"},el("canvas",{id:"incDispIdxChart"})));
+    c.append(card);
+    setTimeout(()=>{
+      const txtC=cssVar("--muted"),gridC=cssVar("--border");
+      const hufArr=incYears().map(y=>(incPartial(y)||dispNet(incPerson,y)==null)?null:+idxHuf(y).toFixed(1));
+      const eurArr=incYears().map(y=>{if(incPartial(y))return null;const v=idxEur(y);return v==null?null:+v.toFixed(1);});
+      makeChart("incDispIdxChart",{type:"line",data:{labels:incYears(),datasets:[
+        {label:"Reál index – HUF (KSH)",data:hufArr,borderColor:cssVar("--accent"),backgroundColor:"transparent",tension:.1,pointRadius:3,borderWidth:2,spanGaps:true},
+        {label:"Reál index – EUR (euróövezet)",data:eurArr,borderColor:cssVar("--pos"),backgroundColor:"transparent",tension:.1,pointRadius:3,borderWidth:2,spanGaps:true},
+        {label:"Bázisszint (100)",data:incYears().map(()=>100),borderColor:cssVar("--muted"),borderDash:[5,4],pointRadius:0,borderWidth:1}
+      ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:txtC,font:{size:11}}},tooltip:{callbacks:{label:x=>x.dataset.label+": "+NUM2.format(x.raw)}}},scales:{x:{ticks:{color:txtC,font:{size:10}},grid:{display:false}},y:{ticks:{color:txtC,font:{size:10}},grid:{color:gridC}}}}});
+    },0);
+  })();
 
   c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},el("h3",{},"Bevétel alakulása (nominál)"),el("div",{class:"chart-box",style:"margin-top:8px"},el("canvas",{id:"incNomChart"}))));
   c.append(el("div",{class:"card pad",style:"margin-bottom:14px"},el("h3",{},"Bér összetétele: alapbér vs bónusz/egyéb"),el("div",{class:"sub",style:"color:var(--muted);font-size:12.5px;margin-top:2px"},"Éves összes bevétel = éves alapbér + bónusz és egyéb (túlóra, cafeteria, 13. havi…). A folyó (részleges) évnél az alapbér ismert, a bónuszt a korábbi évek bónusz/alapbér arányából becslöm (szaggatott, halvány)."),el("div",{class:"chart-box",style:"margin-top:8px"},el("canvas",{id:"incCompChart"}))));
